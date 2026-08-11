@@ -1,0 +1,31 @@
+---
+import ThemeToggle from './ThemeToggle.astro';
+const nav = [
+  { href: '/competitions/', label: '竞赛实录' },
+  { href: '/papers/', label: '论文精读' },
+  { href: '/algorithms/', label: '算法实践' },
+  { href: '/skills/', label: 'Agent 技能' },
+  { href: '/search/', label: '搜索' },
+];
+const path = Astro.url.pathname;
+---
+<header>
+  <div class="container inner">
+    <a href="/" class="brand">edc3000</a>
+    <nav>
+      {nav.map((item) => (
+        <a href={item.href} class={path.startsWith(item.href) ? 'active' : ''}>{item.label}</a>
+      ))}
+    </nav>
+    <ThemeToggle />
+  </div>
+</header>
+
+<style>
+  header { border-bottom: 1px solid var(--line); background: var(--paper-light); }
+  .inner { display: flex; align-items: center; gap: 16px; padding-block: 12px; flex-wrap: wrap; }
+  .brand { font-weight: 700; text-decoration: none; color: var(--ink); }
+  nav { display: flex; gap: 14px; flex: 1; flex-wrap: wrap; }
+  nav a { text-decoration: none; color: var(--muted); font-size: 15px; }
+  nav a.active { color: var(--green); font-weight: 600; }
+</style>
