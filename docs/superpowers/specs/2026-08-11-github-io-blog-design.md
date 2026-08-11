@@ -94,9 +94,10 @@ competitions: {
   medal: 'gold' | 'silver' | 'bronze' | null,
   rank: number,
   totalTeams: number,        // 与 rank 一起在渲染时计算 Top x%
+  rankNote?: string,         // 名次口径说明,例:'公开榜名次'
   metric: string,            // 例:'RMSE'
   publicLB: number,
-  privateLB: number,
+  privateLB?: number,        // 可选,原因见下
   competitionUrl: string,
   richReport?: string,       // 精排版 HTML 的 public 路径,见 §6
 }
@@ -124,6 +125,11 @@ skills: {
   originalAuthor?: string,   // 非原创时必填
 }
 ```
+
+`competitions.privateLB` 为**可选**(2026-08-11 修正,原定必填):核对源报告后发现,
+两篇铜牌报告只记录了公开榜分数,并明确注明「提交历史中的 public/private score 与
+leaderboard 展示口径不同」。强制必填会迫使实现者编造数据。同理增设 `rankNote`
+记录名次口径——rogii 报告区分了公开榜(101)与私榜(177)名次,另两篇只有公开榜名次。
 
 `skills.originalAuthor` 是针对 §2 已知风险的**结构性约束**:转述他人 skill 时,
 schema 强制填写署名,不依赖作者自觉。
