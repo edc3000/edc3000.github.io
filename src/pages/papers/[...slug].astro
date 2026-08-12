@@ -1,0 +1,40 @@
+---
+import PostLayout from '../../layouts/PostLayout.astro';
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('papers', ({ data }) => !data.draft);
+  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+const d = entry.data;
+---
+<PostLayout title={d.title} description={d.description} date={d.date} tags={d.tags}>
+  <div slot="meta" class="paper-meta">
+    <p class="paper-title">{d.paperTitle}</p>
+    <p class="authors">{d.authors.join(', ')} · {d.venue} {d.year}</p>
+    <p class="verdict">{d.verdict}</p>
+    <p class="links">
+      {d.arxivUrl && <a href={d.arxivUrl}>arXiv ↗</a>}
+      {d.codeUrl && <a href={d.codeUrl}>代码 ↗</a>}
+    </p>
+  </div>
+  <Content />
+</PostLayout>
+
+<style>
+  .paper-meta {
+    margin-top: 20px; padding: 20px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--paper-light);
+  }
+  .paper-title { margin: 0; font-weight: 600; }
+  .authors { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
+  .verdict {
+    margin: 16px 0 0; padding-left: 12px;
+    border-left: 3px solid var(--green); font-style: italic;
+  }
+  .links { display: flex; gap: 16px; margin: 16px 0 0; }
+</style>

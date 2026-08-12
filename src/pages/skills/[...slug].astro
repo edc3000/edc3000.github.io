@@ -1,0 +1,39 @@
+---
+import PostLayout from '../../layouts/PostLayout.astro';
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('skills', ({ data }) => !data.draft);
+  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+const d = entry.data;
+---
+<PostLayout title={d.title} description={d.description} date={d.date} tags={d.tags}>
+  <div slot="meta" class="skill-meta">
+    <p class="name">{d.skillName}</p>
+    {d.originalAuthor && (
+      <p class="attribution">原作者:{d.originalAuthor}</p>
+    )}
+    <pre class="install"><code>{d.installCommand}</code></pre>
+    <p><a href={d.repoUrl}>仓库 ↗</a></p>
+  </div>
+  <Content />
+</PostLayout>
+
+<style>
+  .skill-meta {
+    margin-top: 20px; padding: 20px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--paper-light);
+  }
+  .name { margin: 0; font-weight: 600; }
+  .attribution {
+    margin: 8px 0 0; padding: 6px 10px;
+    border-left: 3px solid var(--gold);
+    font-size: 14px; color: var(--muted);
+  }
+  .install { margin: 16px 0; }
+</style>
