@@ -1,0 +1,26 @@
+---
+interface Props {
+  href: string;
+  label: string;
+  count: number;
+  blurb: string;
+}
+const { href, label, count, blurb } = Astro.props;
+---
+<a class="section-card" href={href}>
+  <h3>{label}</h3>
+  <p class="blurb">{blurb}</p>
+  <p class="count">{count > 0 ? `${count} 篇` : '筹备中'}</p>
+</a>
+
+<style>
+  .section-card {
+    display: block; padding: 20px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--paper-light); text-decoration: none; color: var(--ink);
+  }
+  .section-card:hover { border-color: var(--green); }
+  .section-card h3 { margin: 0 0 8px; }
+  .blurb { margin: 0; font-size: 14px; color: var(--muted); }
+  .count { margin: 12px 0 0; font-size: 13px; color: var(--green); font-weight: 600; }
+</style>

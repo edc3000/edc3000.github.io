@@ -1,7 +1,51 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import SectionCard from '../components/SectionCard.astro';
+import PostCard from '../components/PostCard.astro';
+import { getAllPosts, countBySection, SECTION_LABEL } from '../lib/collections';
+
+const posts = await getAllPosts();
+const counts = await countBySection();
+const latest = posts.slice(0, 5);
+
+const blurbs = {
+  competitions: 'Kaggle 完整复盘,含没能奏效的尝试',
+  papers: 'LLM、强化学习与多模态方向的精读笔记',
+  algorithms: '实现细节、性能取舍与踩坑记录',
+  skills: 'Claude Code / AI Agent 技能包',
+} as const;
+
+const sections = (['competitions', 'papers', 'algorithms', 'skills'] as const);
 ---
 <BaseLayout title="edc3000" description="Kaggle 竞赛复盘、论文精读、算法实践与 AI Agent 技能包">
-  <h1>edc3000</h1>
-  <p>站点建设中。</p>
+  <section class="hero">
+    <h1>edc3000</h1>
+    <p>算法工程师。这里记录 Kaggle 竞赛的完整复盘、论文精读、算法实现与 AI Agent 技能包。</p>
+    <p class="sub">所有竞赛复盘都包含失败的尝试,不只是最终方案。</p>
+  </section>
+
+  <section class="grid">
+    {sections.map((s) => (
+      <SectionCard href={`/${s}/`} label={SECTION_LABEL[s]} count={counts[s]} blurb={blurbs[s]} />
+    ))}
+  </section>
+
+  <section>
+    <h2>最新</h2>
+    {latest.map((p) => (
+      <PostCard href={p.href} title={p.title} description={p.description} date={p.date} tags={p.tags} />
+    ))}
+  </section>
 </BaseLayout>
+
+<style>
+  .hero { padding-block: 40px 24px; }
+  .hero h1 { margin: 0 0 12px; }
+  .hero p { margin: 0 0 8px; color: var(--muted); }
+  .sub { font-size: 14px; }
+  .grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    margin-block: 32px;
+  }
+</style>
