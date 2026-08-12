@@ -12,7 +12,7 @@ metric: RMSE
 publicLB: 6.100
 privateLB: 8.074
 competitionUrl: "https://www.kaggle.com/competitions/rogii-wellbore-geology-prediction"
-richReport: "/reports/rogii-wellbore-geology.html"
+richReport: "/reports/competitions/rogii-wellbore-geology.html"
 ---
 
 报告日期：2026-08-10  
