@@ -2,18 +2,11 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import SectionCard from '../components/SectionCard.astro';
 import PostCard from '../components/PostCard.astro';
-import { getAllPosts, countBySection, SECTION_LABEL } from '../lib/collections';
+import { getAllPosts, countBySection, SECTION_LABEL, SECTION_BLURB } from '../lib/collections';
 
 const posts = await getAllPosts();
 const counts = await countBySection();
 const latest = posts.slice(0, 5);
-
-const blurbs = {
-  competitions: 'Kaggle 完整复盘,含没能奏效的尝试',
-  papers: 'LLM、强化学习与多模态方向的精读笔记',
-  algorithms: '实现细节、性能取舍与踩坑记录',
-  skills: 'Claude Code / AI Agent 技能包',
-} as const;
 
 const sections = (['competitions', 'papers', 'algorithms', 'skills'] as const);
 ---
@@ -26,7 +19,7 @@ const sections = (['competitions', 'papers', 'algorithms', 'skills'] as const);
 
   <section class="grid">
     {sections.map((s) => (
-      <SectionCard href={`/${s}/`} label={SECTION_LABEL[s]} count={counts[s]} blurb={blurbs[s]} />
+      <SectionCard href={`/${s}/`} label={SECTION_LABEL[s]} count={counts[s]} blurb={SECTION_BLURB[s]} />
     ))}
   </section>
 

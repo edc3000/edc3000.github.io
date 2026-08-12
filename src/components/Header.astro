@@ -1,10 +1,11 @@
 ---
 import ThemeToggle from './ThemeToggle.astro';
+import { SECTION_LABEL } from '../lib/collections';
 const nav = [
-  { href: '/competitions/', label: '竞赛实录' },
-  { href: '/papers/', label: '论文精读' },
-  { href: '/algorithms/', label: '算法实践' },
-  { href: '/skills/', label: 'Agent 技能' },
+  { href: '/competitions/', label: SECTION_LABEL.competitions },
+  { href: '/papers/', label: SECTION_LABEL.papers },
+  { href: '/algorithms/', label: SECTION_LABEL.algorithms },
+  { href: '/skills/', label: SECTION_LABEL.skills },
   { href: '/search/', label: '搜索' },
 ];
 const path = Astro.url.pathname;

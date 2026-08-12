@@ -24,7 +24,7 @@ git push
 | 竞赛实录 | `src/content/competitions/` |
 | 论文精读 | `src/content/papers/` |
 | 算法实践 | `src/content/algorithms/` |
-| Agent 技能 | `src/content/skills/` |
+| Agent 技能包 | `src/content/skills/` |
 
 新增后自动出现在:板块列表页、首页「最新」、RSS、标签页、全文搜索。
 
@@ -83,7 +83,7 @@ complexity: "O(n log n)"
 ---
 ```
 
-Agent 技能(`originalAuthor` 可选,但转述他人作品时应当填写——schema 不强制,遗漏不会导致构建失败):
+Agent 技能包(`originalAuthor` 可选,但转述他人作品时应当填写——schema 不强制,遗漏不会导致构建失败):
 
 ```yaml
 ---

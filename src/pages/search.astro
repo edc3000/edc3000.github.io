@@ -1,5 +1,7 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+// 必须保留 .astro 扩展名：astro-pagefind 的 package.json exports map 只声明了
+// "./components/*": "./src/components/*"，没有无扩展名回退，省略扩展名会导致构建失败。
 import Search from 'astro-pagefind/components/Search.astro';
 ---
 <BaseLayout title="搜索 · edc3000" description="全站全文搜索">
@@ -8,11 +10,28 @@ import Search from 'astro-pagefind/components/Search.astro';
 </BaseLayout>
 
 <style is:global>
-  .pagefind-ui {
-    --pagefind-ui-primary: var(--green);
-    --pagefind-ui-text: var(--ink);
-    --pagefind-ui-background: var(--paper);
-    --pagefind-ui-border: var(--line);
-    --pagefind-ui-tag: var(--paper-light);
+  /*
+   * astro-pagefind@2 渲染的是 <pagefind-searchbox> 组件 UI，读取 --pf-* 变量
+   * （见 node_modules/astro-pagefind/../pagefind-component-ui.css），而不是旧版
+   * PagefindUI 的 --pagefind-ui-* 变量。该组件不使用 shadow DOM，:root 覆盖可生效。
+   */
+  :root {
+    --pf-text: var(--ink);
+    --pf-background: var(--paper-light);
+    --pf-border: var(--line);
+    --pf-text-secondary: var(--muted);
+    --pf-text-muted: var(--muted);
+    --pf-hover: var(--paper);
+    --pf-mark: var(--green);
+    /*
+     * 不能写 `--pf-font: inherit`：自定义属性的 `inherit` 关键字在 :root 上没有
+     * 父元素可继承，会计算为 guaranteed-invalid 并沿继承链传给所有后代，导致
+     * 组件内所有 `var(--pf-font, ...)` 都退回其英文回退字体栈——用无头浏览器
+     * 实测 getComputedStyle 已确认（输入框 font-family 停在
+     * `system-ui, -apple-system, "system-ui", "Segoe UI", Roboto, sans-serif`，
+     * 没有中文字体)。直接写字面字体栈(与 global.css 里 body 的一致)才会生效。
+     */
+    --pf-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   }
 </style>

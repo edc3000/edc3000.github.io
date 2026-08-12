@@ -26,8 +26,11 @@ const pct = formatTopPercent(rank, totalTeams);
     font-size: 14px;
     background: var(--paper-light);
   }
-  .badge.gold strong { color: var(--gold); }
-  .badge.silver strong { color: var(--blue); }
-  .badge.bronze strong { color: var(--brick); }
+  /* token 色直接作为文字在 --paper-light 背景上亮色模式对比度不达标(需 ≥4.5)。
+     用 color-mix 把文字往 --ink 方向加深,同色相降明度,暗色模式下 --ink 是浅色,
+     对比度只会更高不会变差。 */
+  .badge.gold strong { color: color-mix(in srgb, var(--gold) 60%, var(--ink)); }
+  .badge.silver strong { color: color-mix(in srgb, var(--blue) 85%, var(--ink)); }
+  .badge.bronze strong { color: color-mix(in srgb, var(--brick) 80%, var(--ink)); }
   .pct { color: var(--muted); }
 </style>

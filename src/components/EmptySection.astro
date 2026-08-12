@@ -19,7 +19,11 @@ const { heading, note } = Astro.props;
   }
   .tag {
     display: inline-block; margin: 0 0 12px; padding: 3px 10px;
-    border-radius: 999px; background: var(--gold); color: var(--paper);
+    border-radius: 999px;
+    /* var(--gold) 直配 var(--paper) 文字亮色模式对比度仅 2.85(需 ≥4.5),
+       用 color-mix 把背景往 --ink 方向加深,同色相降明度 */
+    background: color-mix(in srgb, var(--gold) 60%, var(--ink));
+    color: var(--paper);
     font-size: 13px;
   }
   .empty h2 { margin: 0; border: none; }
