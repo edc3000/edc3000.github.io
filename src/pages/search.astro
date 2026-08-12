@@ -1,0 +1,18 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Search from 'astro-pagefind/components/Search.astro';
+---
+<BaseLayout title="搜索 · edc3000" description="全站全文搜索">
+  <h1>搜索</h1>
+  <Search className="pagefind-ui" />
+</BaseLayout>
+
+<style is:global>
+  .pagefind-ui {
+    --pagefind-ui-primary: var(--green);
+    --pagefind-ui-text: var(--ink);
+    --pagefind-ui-background: var(--paper);
+    --pagefind-ui-border: var(--line);
+    --pagefind-ui-tag: var(--paper-light);
+  }
+</style>
