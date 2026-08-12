@@ -25,7 +25,7 @@
 
 **已知风险**:`~/.claude/skills/` 下绝大多数 skill 来自 superpowers 与官方插件,
 vault 内 8 个来自 kepano/obsidian-skills。**只有原创 skill 可进 skills 板块**,
-转述他人作品必须署名(见 §5 的 schema 约束)。
+转述他人作品必须署名(见 §5;这是编辑纪律,schema 不做强制)。
 
 **已知取舍**:四板块并列上线时,论文与算法实践为空。已向用户提示"空栏目对同行社区
 是减分项",用户明确选择四板块全开。据此在 §7 设计诚实的空状态方案。
@@ -122,7 +122,7 @@ skills: {
   skillName: string,
   installCommand: string,
   repoUrl: string,
-  originalAuthor?: string,   // 非原创时必填
+  originalAuthor?: string,   // 转述他人作品时应填,schema 不强制
 }
 ```
 
