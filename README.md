@@ -83,7 +83,7 @@ complexity: "O(n log n)"
 ---
 ```
 
-Agent 技能(`originalAuthor` 在转述他人作品时必填):
+Agent 技能(`originalAuthor` 可选,但转述他人作品时应当填写——schema 不强制,遗漏不会导致构建失败):
 
 ```yaml
 ---

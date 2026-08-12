@@ -131,8 +131,10 @@ skills: {
 leaderboard 展示口径不同」。强制必填会迫使实现者编造数据。同理增设 `rankNote`
 记录名次口径——rogii 报告区分了公开榜(101)与私榜(177)名次,另两篇只有公开榜名次。
 
-`skills.originalAuthor` 是针对 §2 已知风险的**结构性约束**:转述他人 skill 时,
-schema 强制填写署名,不依赖作者自觉。
+`skills.originalAuthor` 为针对 §2 已知风险提供的**约定位置**:Zod 无法表达
+「仅当转述他人作品时必填」这一条件式约束(需要额外的判别字段,如
+`isOriginal`,才能做到),因此该字段是 `.optional()`——遗漏时 schema 不会
+拒绝,是编辑约定而非构建时强制。
 
 ## 6. 精排版 HTML 双轨方案
 
