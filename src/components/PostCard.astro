@@ -1,0 +1,30 @@
+---
+import { formatDate } from '../lib/format';
+
+interface Props {
+  href: string;
+  title: string;
+  description: string;
+  date: Date;
+  tags: string[];
+}
+const { href, title, description, date, tags } = Astro.props;
+---
+<article class="card">
+  <a href={href}><h3>{title}</h3></a>
+  <p class="desc">{description}</p>
+  <p class="meta">
+    <time datetime={date.toISOString()}>{formatDate(date)}</time>
+    {tags.map((t) => <a class="tag" href={`/tags/${t}/`}>#{t}</a>)}
+    <slot name="badge" />
+  </p>
+</article>
+
+<style>
+  .card { padding-block: 20px; border-bottom: 1px solid var(--line); }
+  .card h3 { margin: 0 0 6px; color: var(--ink); }
+  .card a { text-decoration: none; }
+  .desc { margin: 0 0 8px; color: var(--muted); }
+  .meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 14px; color: var(--muted); margin: 0; }
+  .tag { color: var(--green); text-decoration: none; }
+</style>

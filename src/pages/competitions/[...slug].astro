@@ -1,0 +1,41 @@
+---
+import PostLayout from '../../layouts/PostLayout.astro';
+import MedalBadge from '../../components/MedalBadge.astro';
+import RichReportLink from '../../components/RichReportLink.astro';
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('competitions', ({ data }) => !data.draft);
+  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+const d = entry.data;
+---
+<PostLayout title={d.title} description={d.description} date={d.date} tags={d.tags}>
+  <div slot="meta" class="comp-meta">
+    <MedalBadge medal={d.medal} rank={d.rank} totalTeams={d.totalTeams} />
+    {d.rankNote && <p class="note">{d.rankNote}</p>}
+    <dl>
+      <div><dt>指标</dt><dd>{d.metric}</dd></div>
+      <div><dt>公开榜</dt><dd>{d.publicLB}</dd></div>
+      {d.privateLB !== undefined && <div><dt>私榜</dt><dd>{d.privateLB}</dd></div>}
+    </dl>
+    <p><a href={d.competitionUrl}>比赛主页 ↗</a></p>
+    {d.richReport && <RichReportLink href={d.richReport} />}
+  </div>
+  <Content />
+</PostLayout>
+
+<style>
+  .comp-meta {
+    margin-top: 20px; padding: 20px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--paper-light);
+  }
+  .note { font-size: 14px; color: var(--muted); margin: 10px 0 0; }
+  dl { display: flex; gap: 24px; flex-wrap: wrap; margin: 16px 0; }
+  dt { font-size: 13px; color: var(--muted); }
+  dd { margin: 0; font-weight: 600; }
+</style>

@@ -1,0 +1,33 @@
+---
+import { formatTopPercent, MEDAL_LABEL } from '../lib/format';
+
+interface Props {
+  medal: 'gold' | 'silver' | 'bronze' | null;
+  rank: number;
+  totalTeams: number;
+}
+const { medal, rank, totalTeams } = Astro.props;
+const pct = formatTopPercent(rank, totalTeams);
+---
+<span class:list={['badge', medal]}>
+  {medal && <strong>{MEDAL_LABEL[medal]}</strong>}
+  <span>{rank} / {totalTeams}</span>
+  {pct && <span class="pct">{pct}</span>}
+</span>
+
+<style>
+  .badge {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    font-size: 14px;
+    background: var(--paper-light);
+  }
+  .badge.gold strong { color: var(--gold); }
+  .badge.silver strong { color: var(--blue); }
+  .badge.bronze strong { color: var(--brick); }
+  .pct { color: var(--muted); }
+</style>

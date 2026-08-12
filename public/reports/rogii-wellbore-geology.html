@@ -1,0 +1,1195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ROGII Wellbore Geology Prediction 银牌方案完整解读">
+  <title>ROGII Wellbore Geology Prediction · 银牌方案解读</title>
+  <style>
+    :root {
+      --paper: #f8f5ec;
+      --paper-light: #fbfaf6;
+      --ink: #292a26;
+      --muted: #706b60;
+      --line: #ded8ca;
+      --green: #2c675b;
+      --green-dark: #263d38;
+      --green-soft: #edf3f1;
+      --blue: #587c98;
+      --blue-soft: #edf1f5;
+      --gold: #b98a3d;
+      --gold-soft: #eee6d3;
+      --brick: #c56050;
+      --brick-soft: #f3e9e4;
+      --comment: #7bd89b;
+      --content-width: 780px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 62px;
+      background: var(--paper);
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.72;
+      letter-spacing: 0;
+    }
+
+    a { color: inherit; }
+
+    code,
+    pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", monospace;
+    }
+
+    code:not(pre code) {
+      padding: 0.08em 0.28em;
+      border-radius: 4px;
+      background: rgba(44, 103, 91, 0.08);
+      color: #294e46;
+      overflow-wrap: anywhere;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 20;
+      transform: translateY(-150%);
+      padding: 8px 10px;
+      border-radius: 4px;
+      background: var(--green-dark);
+      color: #fff;
+      text-decoration: none;
+    }
+
+    .skip-link:focus { transform: translateY(0); }
+
+    .page-header {
+      width: min(calc(100% - 32px), var(--content-width));
+      margin: 0 auto;
+      padding: 40px 0 24px;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-bottom: 14px;
+    }
+
+    .tag {
+      padding: 5px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .tag-primary { background: var(--green); color: #fff; }
+    .tag-neutral { background: #ece6d8; color: #655f53; }
+    .tag-blue { background: #e4eaf0; color: #4e6272; }
+
+    h1,
+    h2,
+    h3,
+    p { letter-spacing: 0; }
+
+    h1 {
+      margin: 0;
+      font-size: 2rem;
+      line-height: 1.24;
+      font-weight: 780;
+    }
+
+    .subtitle {
+      margin: 10px 0 3px;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .byline {
+      margin: 0;
+      color: #918879;
+      font-size: 0.82rem;
+    }
+
+    .report-nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: rgba(248, 245, 236, 0.97);
+      backdrop-filter: blur(8px);
+    }
+
+    .report-nav-inner {
+      display: flex;
+      gap: 18px;
+      width: min(calc(100% - 32px), var(--content-width));
+      margin: 0 auto;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .report-nav a {
+      flex: 0 0 auto;
+      padding: 12px 0 9px;
+      border-bottom: 3px solid transparent;
+      color: #766f62;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .report-nav a:hover,
+    .report-nav a:focus-visible {
+      border-bottom-color: var(--green);
+      color: var(--green);
+      outline: none;
+    }
+
+    main {
+      display: grid;
+      gap: 42px;
+      width: min(calc(100% - 32px), var(--content-width));
+      margin: 0 auto;
+      padding: 30px 0 56px;
+    }
+
+    .report-section {
+      min-width: 0;
+      scroll-margin-top: 62px;
+    }
+
+    .section-title {
+      margin: 0 0 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+      font-size: 1.38rem;
+      line-height: 1.35;
+      font-weight: 780;
+    }
+
+    .section-lead {
+      margin: 0 0 16px;
+      color: #4e504b;
+      font-size: 0.96rem;
+    }
+
+    .conclusion {
+      padding: 18px 20px;
+      border-left: 4px solid #8c774d;
+      border-radius: 7px;
+      background: #eef0e6;
+    }
+
+    .conclusion-label {
+      margin-bottom: 7px;
+      color: #6e5b37;
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .conclusion p { margin: 0 0 7px; }
+    .conclusion p:last-child { margin-bottom: 0; }
+
+    .diagram-panel {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(42, 42, 36, 0.05);
+    }
+
+    .diagram-panel svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .figure-note {
+      margin: 9px 2px 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .two-column,
+    .concept-grid,
+    .train-test-grid,
+    .sample-grid,
+    .result-grid,
+    .step-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric-explain {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-left: 3px solid var(--blue);
+      border-radius: 6px;
+      background: var(--blue-soft);
+    }
+
+    .formula-inline {
+      display: block;
+      margin-top: 7px;
+      color: #405e75;
+      font: 0.84rem/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .concept-card {
+      padding: 13px 14px;
+      border-left: 4px solid var(--blue);
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    .concept-card:nth-child(2) { border-left-color: #7a8f70; }
+    .concept-card:nth-child(3) { border-left-color: var(--gold); }
+    .concept-card:nth-child(4) { border-left-color: var(--brick); }
+    .concept-card:last-child {
+      grid-column: 1 / -1;
+      border-left-color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .concept-card h3 {
+      margin: 0 0 3px;
+      font-size: 0.96rem;
+      line-height: 1.4;
+    }
+
+    .concept-card p {
+      margin: 0;
+      color: #55574f;
+      font-size: 0.88rem;
+    }
+
+    .data-tree {
+      margin: 0 0 14px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: #3f4945;
+      font-size: 0.79rem;
+      line-height: 1.75;
+      overflow-x: auto;
+    }
+
+    .dataset-card {
+      padding: 15px;
+      border: 1px solid #c8d9d3;
+      border-top: 4px solid var(--green);
+      border-radius: 8px;
+      background: var(--green-soft);
+    }
+
+    .dataset-card.test {
+      border-color: #cbd7e0;
+      border-top-color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .dataset-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .dataset-header h3 {
+      margin: 0;
+      color: #234f47;
+      font-size: 1.03rem;
+      line-height: 1.35;
+    }
+
+    .test .dataset-header h3 { color: #405e75; }
+
+    .dataset-badge {
+      flex: 0 0 auto;
+      padding: 4px 7px;
+      border-radius: 4px;
+      background: var(--green);
+      color: #fff;
+      font-size: 0.69rem;
+      font-weight: 800;
+    }
+
+    .test .dataset-badge { background: var(--blue); }
+
+    .field-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+    }
+
+    .field-list div {
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(44, 103, 91, 0.14);
+    }
+
+    .test .field-list div { border-bottom-color: rgba(88, 124, 152, 0.16); }
+    .field-list div:last-child { padding-bottom: 0; border-bottom: 0; }
+
+    .field-list dt {
+      margin-bottom: 2px;
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    .field-list dd {
+      margin: 0;
+      color: #4d5652;
+      font-size: 0.82rem;
+    }
+
+    .inline-note {
+      margin: 12px 0 0;
+      padding: 9px 0 0 11px;
+      border-top: 1px solid rgba(44, 103, 91, 0.18);
+      color: #48665e;
+      font-size: 0.8rem;
+    }
+
+    .test .inline-note {
+      border-top-color: rgba(88, 124, 152, 0.18);
+      color: #486073;
+    }
+
+    .data-scale {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin: 14px 0;
+    }
+
+    .scale-item {
+      padding: 11px 8px;
+      border-top: 3px solid var(--gold);
+      background: #fff;
+      text-align: center;
+    }
+
+    .scale-item strong {
+      display: block;
+      color: #765f37;
+      font: 800 1.04rem/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .scale-item span {
+      color: var(--muted);
+      font-size: 0.7rem;
+      line-height: 1.35;
+    }
+
+    .sample-title {
+      margin: 20px 0 6px;
+      font-size: 1rem;
+      line-height: 1.4;
+    }
+
+    .sample-intro {
+      margin: 0 0 10px;
+      color: #646157;
+      font-size: 0.85rem;
+    }
+
+    .sample-file {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(42, 42, 36, 0.05);
+      font: 0.75rem/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+      overflow-x: auto;
+    }
+
+    .sample-file-title {
+      margin-bottom: 7px;
+      color: #3f4945;
+      font-family: inherit;
+      font-weight: 800;
+    }
+
+    .sample-row {
+      display: grid;
+      grid-template-columns: 45px 55px 58px minmax(105px, 1fr);
+      gap: 6px;
+      min-width: 300px;
+    }
+
+    .sample-row.header { color: #857e70; }
+    .sample-row.predict { background: var(--brick-soft); }
+    .sample-divider { height: 1px; margin: 4px 0; background: var(--brick); }
+    .known-value { color: var(--green); }
+    .unknown-value { color: #b35648; }
+
+    .data-flow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr);
+      align-items: stretch;
+      gap: 9px;
+      margin-top: 12px;
+    }
+
+    .flow-input,
+    .flow-output {
+      padding: 13px;
+      border-radius: 7px;
+      font-size: 0.82rem;
+    }
+
+    .flow-input { background: #e7edf0; }
+    .flow-output { background: var(--green-dark); color: #fff; }
+
+    .flow-output strong { color: #d9bd75; }
+
+    .flow-arrow {
+      display: grid;
+      place-items: center;
+      color: #9a8b70;
+      font-size: 1.4rem;
+      font-weight: 800;
+    }
+
+    .warning-note,
+    .leak-note {
+      margin-top: 9px;
+      padding: 10px 12px;
+      border-left: 3px solid var(--brick);
+      border-radius: 6px;
+      background: var(--brick-soft);
+      font-size: 0.82rem;
+    }
+
+    .leak-note {
+      border-left-color: var(--gold);
+      background: var(--gold-soft);
+    }
+
+    .method-list {
+      display: grid;
+      min-width: 0;
+      gap: 9px;
+    }
+
+    .method-step {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(42, 42, 36, 0.05);
+    }
+
+    .method-step[open] {
+      border-color: #a7beb6;
+      box-shadow: 0 5px 16px rgba(44, 103, 91, 0.09);
+    }
+
+    .method-step > summary {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      padding: 14px;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .method-step > summary::-webkit-details-marker { display: none; }
+
+    .method-step > summary::before {
+      content: "+";
+      display: grid;
+      place-items: center;
+      width: 25px;
+      height: 25px;
+      border: 1px solid #b8c9c3;
+      border-radius: 50%;
+      background: var(--green-soft);
+      color: var(--green);
+      font-size: 1.05rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .method-step[open] > summary::before { content: "−"; }
+    .method-step > summary:hover { background: var(--paper-light); }
+
+    .method-step > summary:focus-visible {
+      outline: 2px solid var(--green);
+      outline-offset: -2px;
+    }
+
+    .step-title {
+      display: block;
+      color: #343733;
+      font-size: 0.95rem;
+      font-weight: 800;
+      line-height: 1.45;
+    }
+
+    .step-teaser {
+      display: block;
+      margin-top: 3px;
+      color: #887f70;
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+
+    .step-body {
+      display: grid;
+      min-width: 0;
+      gap: 11px;
+      padding: 14px 16px 17px 52px;
+      border-top: 1px solid #e5dfd2;
+      color: #4e504b;
+      font-size: 0.86rem;
+    }
+
+    .step-body p { margin: 0; }
+
+    .step-detail {
+      padding: 10px 11px;
+      border-radius: 6px;
+      background: #f7f5ef;
+    }
+
+    .step-detail b,
+    .step-body > p > b { color: #344b45; }
+
+    .step-formula {
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: var(--green-dark);
+      color: #f5f3eb;
+      font: 0.77rem/1.72 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .step-formula b {
+      color: #d9bd75;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .step-guard {
+      padding: 10px 11px;
+      border-left: 3px solid var(--brick);
+      border-radius: 6px;
+      background: var(--brick-soft);
+    }
+
+    .code-caption {
+      margin: 2px 0 -6px;
+      color: #526a63;
+      font-size: 0.76rem;
+      font-weight: 800;
+    }
+
+    .code-block {
+      min-width: 0;
+      max-width: 100%;
+      margin: 0;
+      padding: 13px 14px;
+      overflow-x: auto;
+      border: 1px solid #314e47;
+      border-radius: 6px;
+      background: #1f302c;
+      color: #edf1ec;
+      font-size: 0.75rem;
+      line-height: 1.62;
+      tab-size: 4;
+      white-space: pre;
+    }
+
+    .code-block code { color: inherit; font: inherit; }
+    .code-comment { color: var(--comment); }
+
+    .final-formula {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-left: 3px solid var(--green);
+      border-radius: 6px;
+      background: var(--green-soft);
+      font-size: 0.85rem;
+    }
+
+    .result-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .result-card {
+      padding: 16px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      text-align: center;
+    }
+
+    .result-card strong {
+      display: block;
+      color: #8c6a3c;
+      font: 800 1.55rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .result-card:nth-child(2) strong { color: var(--green); }
+    .result-card:nth-child(3) strong { color: var(--blue); }
+
+    .result-card span {
+      color: #847b6c;
+      font-size: 0.75rem;
+    }
+
+    .limitation-list {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .limitation-list li {
+      padding: 11px 13px;
+      border-left: 3px solid var(--gold);
+      background: var(--gold-soft);
+      font-size: 0.86rem;
+    }
+
+    .page-footer {
+      width: min(calc(100% - 32px), var(--content-width));
+      margin: 0 auto;
+      padding: 20px 0 32px;
+      border-top: 1px solid var(--line);
+      color: #918879;
+      font-size: 0.75rem;
+      text-align: center;
+    }
+
+    @media (max-width: 680px) {
+      .page-header { padding-top: 28px; }
+      h1 { font-size: 1.62rem; }
+      main { gap: 34px; padding-top: 24px; }
+      .section-title { font-size: 1.22rem; }
+
+      .two-column,
+      .concept-grid,
+      .train-test-grid,
+      .sample-grid,
+      .result-grid,
+      .step-detail-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .concept-card:last-child { grid-column: auto; }
+      .data-scale { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+      .data-flow {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-arrow { min-height: 28px; transform: rotate(90deg); }
+      .step-body { padding-left: 16px; }
+      .code-block { font-size: 0.7rem; }
+    }
+
+    @media print {
+      .report-nav,
+      .skip-link { display: none; }
+      body { background: #fff; }
+      main { width: 100%; }
+      .method-step,
+      .diagram-panel,
+      .result-card { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳到正文</a>
+
+  <header class="page-header">
+    <div class="tags" aria-label="主题标签">
+      <span class="tag tag-primary">Kaggle Code</span>
+      <span class="tag tag-neutral">Geosteering</span>
+      <span class="tag tag-blue">Sequence Inversion</span>
+    </div>
+    <h1>如何从随钻信号推断地下地层位置</h1>
+    <p class="subtitle">ROGII Wellbore Geology Prediction · 银牌方案完整解读</p>
+    <p class="byline">从业务问题、数据字段到邻井参考、序列后验和风险门控</p>
+  </header>
+
+  <nav class="report-nav" aria-label="文章目录">
+    <div class="report-nav-inner">
+      <a href="#conclusion">核心结论</a>
+      <a href="#background">任务背景</a>
+      <a href="#concepts">基础概念</a>
+      <a href="#data">输入输出</a>
+      <a href="#method">方案详解</a>
+      <a href="#results">结果</a>
+      <a href="#limitations">局限</a>
+    </div>
+  </nav>
+
+  <main id="main-content">
+    <section id="conclusion" class="report-section conclusion">
+      <div class="conclusion-label">核心结论</div>
+      <p><strong>要预测什么：</strong>水平井钻过 Prediction Start 后，每一英尺位置对应的地层 TVT 坐标。</p>
+      <p><strong>怎么预测：</strong>先生成稳定基础轨迹，再用邻井和本井前缀构造 GR(TVT) 参考，通过分段后验搜索修正，并对高不确定井自动减弱修正。</p>
+      <p><strong>最终结果：</strong>Public RMSE <strong>6.100</strong>，Private RMSE <strong>8.074</strong>。RMSE 越低越好。</p>
+    </section>
+
+    <section id="background" class="report-section">
+      <h2 class="section-title">这场比赛在解决什么真实问题</h2>
+      <p class="section-lead">石油与天然气水平井不是竖直向下钻，而是进入目标地层后沿水平方向延伸。钻头需要尽量停留在有效储层中，但地下岩层会倾斜、起伏，钻井人员看不到地下，只能依赖井眼轨迹和随钻测井信号判断当前位置。</p>
+      <p class="section-lead"><strong>比赛把这个过程转成序列预测：</strong>给模型井的已钻前段和地层参考曲线，让模型推断尚未提供 TVT 的后段位于地层序列的什么位置。</p>
+
+      <figure class="diagram-panel">
+        <svg viewBox="0 0 680 190" role="img" aria-label="水平井穿越倾斜地层并从 Prediction Start 开始预测 TVT">
+          <rect width="680" height="190" rx="6" fill="#fbfaf6"></rect>
+          <path d="M0 58 L680 12 M0 101 L680 55 M0 144 L680 98 M0 187 L680 141" stroke="#d4bd83" stroke-width="25" opacity=".36"></path>
+          <path d="M18 32 C109 34 143 120 249 122 C337 124 409 80 501 91 C576 100 618 125 658 118" fill="none" stroke="#2c675b" stroke-width="5"></path>
+          <circle cx="249" cy="122" r="7" fill="#c56050"></circle>
+          <line x1="249" y1="122" x2="249" y2="164" stroke="#c56050" stroke-dasharray="4 3"></line>
+          <text x="24" y="24" font-size="12" fill="#526a63">井眼轨迹</text>
+          <text x="259" y="165" font-size="12" fill="#765349">Prediction Start：从这里开始补全 TVT</text>
+          <text x="490" y="34" font-size="12" fill="#7f704e">倾斜地层</text>
+        </svg>
+        <figcaption class="figure-note"><strong>读图方式：</strong>绿色曲线是钻头路线，浅金色带是岩层。钻头的空间高度变化不大，也可能横穿多个地层位置，因此不能直接拿 Z 当 TVT。</figcaption>
+      </figure>
+
+      <div class="metric-explain">
+        <strong>评分方式：RMSE</strong><br>
+        对每个待预测行比较预测 TVT 与真实 TVT，平方后求平均，再开平方。较大的单点错误会受到更重惩罚。
+        <span class="formula-inline">RMSE = sqrt( (1/N) × Σ(TVT_pred − TVT_true)² )</span>
+      </div>
+    </section>
+
+    <section id="concepts" class="report-section">
+      <h2 class="section-title">先认识五个基础概念</h2>
+      <div class="concept-grid">
+        <article class="concept-card">
+          <h3>MD · 沿井距离</h3>
+          <p>Measured Depth，从井口沿弯曲井眼累计走过的长度，不是垂直深度。数据约每 1 ft 记录一行。</p>
+        </article>
+        <article class="concept-card">
+          <h3>X / Y / Z · 空间位置</h3>
+          <p>X、Y 是平面坐标，Z 是高程。它们描述钻头在三维空间中的位置和井眼形状。</p>
+        </article>
+        <article class="concept-card">
+          <h3>GR · 岩层指纹</h3>
+          <p>Gamma Ray 反映岩石天然放射性。不同地层会形成不同信号模式，但同一模式可能重复，数据也可能缺失或含噪声。</p>
+        </article>
+        <article class="concept-card">
+          <h3>TVT · 地层坐标</h3>
+          <p>True Vertical Thickness 在本数据中作为累计地层坐标，表示钻头位于地层序列的什么位置。它是比赛的预测目标。</p>
+        </article>
+        <article class="concept-card">
+          <h3>Typewell · 垂直参考字典</h3>
+          <p>Typewell 给出 <code>TVT → GR</code> 的参考曲线。模型把水平井观察到的 GR 与这张字典及邻井曲线对齐，从而反推出 TVT。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="data" class="report-section">
+      <h2 class="section-title">输入和输出：训练集、测试集要分开理解</h2>
+      <p class="section-lead">训练集给“题目 + 完整答案”，测试集只给“题目 + 前半段提示”，模型要补出后半段答案。每口井都由一份水平井文件和一份垂直参考井文件组成。</p>
+
+      <pre class="data-tree" aria-label="数据目录结构"><code>train/
+  &lt;well_id&gt;__horizontal_well.csv  ← 水平井轨迹、GR 与训练答案
+  &lt;well_id&gt;__typewell.csv         ← 该井的垂直 GR 参考曲线
+test/
+  &lt;well_id&gt;__horizontal_well.csv  ← 要预测的水平井
+  &lt;well_id&gt;__typewell.csv         ← 推理时可用的垂直参考曲线
+sample_submission.csv             ← 规定提交 ID 与顺序</code></pre>
+
+      <div class="data-scale" aria-label="数据规模">
+        <div class="scale-item"><strong>773</strong><span>训练水平井</span></div>
+        <div class="scale-item"><strong>5,092,255</strong><span>训练水平井总行数</span></div>
+        <div class="scale-item"><strong>3</strong><span>公开测试模板井</span></div>
+        <div class="scale-item"><strong>14,151</strong><span>公开模板待预测行</span></div>
+      </div>
+
+      <div class="train-test-grid">
+        <article class="dataset-card">
+          <div class="dataset-header">
+            <h3>训练集：模型用来学习</h3>
+            <span class="dataset-badge">773 口井</span>
+          </div>
+          <dl class="field-list">
+            <div>
+              <dt>水平井输入</dt>
+              <dd><code>MD, X, Y, Z, GR, TVT_input</code>。这些字段在正式推理时也存在。</dd>
+            </div>
+            <div>
+              <dt>训练答案</dt>
+              <dd><code>TVT</code> 保存整口井每一行的真实地层坐标。训练时可遮住后缀进行模拟预测，再与真实值比较。</dd>
+            </div>
+            <div>
+              <dt>训练专有字段</dt>
+              <dd><code>ANCC, ASTNU, ASTNL, EGFDU, EGFDL, BUDA</code> 是地层界面信息。测试集没有，因此银牌方案不把它们作为推理输入。</dd>
+            </div>
+            <div>
+              <dt>训练 Typewell</dt>
+              <dd><code>TVT, GR, Geology</code>。它提供从地层坐标到典型 GR 的参考关系。</dd>
+            </div>
+          </dl>
+          <p class="inline-note"><strong>训练过程：</strong>读入特征 → 预测 TVT → 与真实 TVT 比较 → 调整模型。训练集本身不会生成提交文件。</p>
+        </article>
+
+        <article class="dataset-card test">
+          <div class="dataset-header">
+            <h3>测试集：模型用来答题</h3>
+            <span class="dataset-badge">隐藏评分</span>
+          </div>
+          <dl class="field-list">
+            <div>
+              <dt>水平井输入</dt>
+              <dd>只有 <code>MD, X, Y, Z, GR, TVT_input</code>，没有完整 <code>TVT</code>，也没有训练专有地层界面字段。</dd>
+            </div>
+            <div>
+              <dt>已知前缀</dt>
+              <dd>Prediction Start 之前的 <code>TVT_input</code> 有值，告诉模型这口井前半段已经位于哪里。</dd>
+            </div>
+            <div>
+              <dt>未知后缀</dt>
+              <dd>Prediction Start 之后的 <code>TVT_input</code> 为空。这些行就是最终需要预测的题目。</dd>
+            </div>
+            <div>
+              <dt>测试 Typewell</dt>
+              <dd>只提供 <code>TVT, GR</code> 参考曲线，没有 <code>Geology</code>。</dd>
+            </div>
+          </dl>
+          <p class="inline-note"><strong>Code 比赛机制：</strong>公开 test 只有 3 口模板井；正式评分时 Kaggle 会换成隐藏测试井重新运行 Notebook，所以代码不能写死井号、井数或公开行数。</p>
+        </article>
+      </div>
+
+      <h3 class="sample-title">测试集示例：已知前缀在哪里变成待预测后缀？</h3>
+      <p class="sample-intro">公开井 <code>000d7d20</code> 共 5,278 行。第 0–1441 行有 <code>TVT_input</code>，第 1442–5277 行为空，因此需要输出 3,836 个 TVT 预测。</p>
+
+      <div class="sample-grid">
+        <div class="sample-file">
+          <div class="sample-file-title">test/...__horizontal_well.csv</div>
+          <div class="sample-row header"><span>row</span><span>MD</span><span>GR</span><span>TVT_input</span></div>
+          <div class="sample-row"><span>1441</span><span>12908</span><span>NaN</span><span class="known-value">11747.37</span></div>
+          <div class="sample-divider"></div>
+          <div class="sample-row predict"><span>1442</span><span>12909</span><span>NaN</span><span class="unknown-value">NaN ← 要预测</span></div>
+          <div class="sample-row predict"><span>1445</span><span>12912</span><span>104.82</span><span class="unknown-value">NaN ← 要预测</span></div>
+        </div>
+
+        <div class="sample-file">
+          <div class="sample-file-title">test/...__typewell.csv</div>
+          <span style="color:#857e70">TVT, GR</span><br>
+          11223.95, 126.11<br>
+          11224.45, 128.22<br>
+          11224.95, 128.72
+          <p class="figure-note">这不是答案，而是垂直井参考模板。模型仍需判断水平井当前应对应模板中的哪一个 TVT。</p>
+        </div>
+      </div>
+
+      <div class="data-flow">
+        <div class="flow-input">
+          <strong>模型在测试时获得</strong><br>
+          整条井的 MD 与 X/Y/Z<br>
+          当前可用的 GR<br>
+          前缀 TVT_input<br>
+          该井 typewell 参考曲线
+        </div>
+        <div class="flow-arrow" aria-hidden="true">→</div>
+        <div class="flow-output">
+          <strong>submission.csv</strong><br>
+          <code style="background:transparent;color:#fff;padding:0">id,tvt</code><br>
+          000d7d20_1442,预测值<br>
+          000d7d20_1443,预测值
+        </div>
+      </div>
+
+      <div class="warning-note"><strong>输出规则：</strong><code>id</code> 由“井号 + 后缀零基行号”组成，<code>tvt</code> 是该行预测值。必须保持 <code>sample_submission.csv</code> 的 ID 和顺序，不能漏行或重复。</div>
+      <div class="leak-note"><strong>防止数据泄漏：</strong>模型绝对看不到测试井后缀的真实 TVT，也不能使用测试集不存在的训练专有地层界面字段。只能从训练井规律、测试井可见前缀、轨迹、GR 和 typewell 推断答案。</div>
+    </section>
+
+    <section id="method" class="report-section">
+      <h2 class="section-title">银牌方案：六个步骤连起来看</h2>
+      <p class="section-lead">六步构成一条连续流水线：前四步准备可信参考，第五步生成另一条地层轨迹，第六步判断这条轨迹值得采用多少。每一步均包含计算过程、关键参数、代码和失败保护。</p>
+
+      <div class="method-list">
+        <details class="method-step" open>
+          <summary>
+            <span><span class="step-title">步骤一：先生成一条稳定的基础轨迹</span><span class="step-teaser">不从零猜答案，先用成熟的几何与信号模型给后续修正提供可靠锚点。</span></span>
+          </summary>
+          <div class="step-body">
+            <p>像导航先给出一条大体可靠的主路线。后面的复杂算法只负责局部纠偏，不允许把整条路线推翻。</p>
+            <div class="step-detail-grid">
+              <div class="step-detail"><b>输入</b><br>测试井的 MD、X/Y/Z、GR、已知 TVT 前缀，以及该井的 typewell 参考曲线。</div>
+              <div class="step-detail"><b>输出</b><br>从 Prediction Start 到井尾逐行连续的 <code>TVT_base</code>，也是最终融合的安全基线。</div>
+            </div>
+            <p><b>具体计算：</b>先把井眼几何和前缀 TVT 转成地层面状态，再用 GR/typewell 对齐为候选位置打分；粒子滤波在多条可能路径间保留概率质量，树模型学习其系统性残差，最后叠加投影、接触面和可见前缀校正，形成平滑连续轨迹。</p>
+            <div class="step-formula"><b>核心状态：</b>U = TVT + Z；因此 TVT = U − Z。<br><b>关键设置：</b>GR 噪声系数 1.30；分支修正强度 2.40 ft；单次修正上限 4.50 ft。</div>
+            <div class="code-caption">关键代码 · 融合锚点并在地层面空间做稳健投影</div>
+            <pre class="code-block"><code>def build_base_trajectory(t_ridge, t_selector, t_learned, z, md):
+    <span class="code-comment"># 两条粒子滤波轨迹先形成稳定锚点</span>
+    t_anchor = 0.30 * t_ridge + 0.70 * t_selector
+
+    <span class="code-comment"># 转到 U = TVT + Z 空间，地层面趋势会比原始 TVT 更平滑</span>
+    u_anchor = t_anchor + z
+    u_trend = robust_poly_projection(md, u_anchor, degree=3)
+
+    <span class="code-comment"># 保留 25% 原锚点，并加入 75% 的物理连续投影</span>
+    t_projected = 0.25 * t_anchor + 0.75 * (u_trend - z)
+
+    <span class="code-comment"># 与训练得到的轨迹模型融合，输出后续模块的安全基线</span>
+    t_base = 0.60 * t_projected + 0.40 * t_learned
+    return t_base</code></pre>
+            <div class="step-detail-grid">
+              <div class="step-detail"><b>为什么有效</b><br>几何提供连续性，GR 提供地层纹理，粒子滤波保留多种解释，树模型补偿固定偏差，几类信息互相约束。</div>
+              <div class="step-guard"><b>失败保护</b><br>GR 缺失时仍可依靠几何与已有轨迹；任何新分支最终都只能对这条基础轨迹做有界修正。</div>
+            </div>
+          </div>
+        </details>
+
+        <details class="method-step">
+          <summary>
+            <span><span class="step-title">步骤二：把 773 口训练井做成 GR(TVT) 参考库</span><span class="step-teaser">把训练井中已经知道答案的 GR 信号，整理成可以按地层坐标查询的字典。</span></span>
+          </summary>
+          <div class="step-body">
+            <p>typewell 像一本通用字典，但邻近水平井更像当地口音。先把每口训练井整理成一本“小字典”，测试时再挑最像的几本参考。</p>
+            <div class="step-detail-grid">
+              <div class="step-detail"><b>使用的训练列</b><br><code>X, Y, TVT, GR</code>。其中完整 TVT 只来自训练集，不会读取测试井隐藏答案。</div>
+              <div class="step-detail"><b>每口井保存什么</b><br>井号、井的中心 X/Y，以及一条按 TVT 从浅到深排列的 GR 曲线。</div>
+            </div>
+            <p><b>具体计算：</b>把每一行真实 TVT 四舍五入到最近的 0.5 ft 网格；同一网格可能落入多行 GR，取这些 GR 的中位数；按 TVT 排序后得到该井的 <code>GR_reference(TVT)</code>。</p>
+            <div class="step-formula"><b>分箱：</b>bin(TVTᵢ) = round(TVTᵢ / 0.5) × 0.5<br><b>聚合：</b>GR_w(b) = median { GRᵢ | bin(TVTᵢ) = b }</div>
+            <div class="code-caption">关键代码 · 把一口训练井压缩成 0.5 ft 分辨率参考曲线</div>
+            <pre class="code-block"><code>def build_reference_curve(horizontal, step_ft=0.5):
+    <span class="code-comment"># 只允许训练集的完整 TVT 进入参考库</span>
+    tvt = pd.to_numeric(horizontal["TVT"], errors="coerce").to_numpy()
+    gr = pd.to_numeric(horizontal["GR"], errors="coerce").to_numpy()
+    valid = np.isfinite(tvt) &amp; np.isfinite(gr)
+
+    <span class="code-comment"># 将相近 TVT 合并到同一个 0.5 ft 网格</span>
+    tvt_bin = np.round(tvt[valid] / step_ft) * step_ft
+    curve = pd.DataFrame({"TVT": tvt_bin, "GR": gr[valid]})
+
+    <span class="code-comment"># 中位数能降低 GR 尖峰和重复穿层的影响</span>
+    curve = curve.groupby("TVT", as_index=False)["GR"].median()
+    if len(curve) &lt; 20:
+        raise ValueError("有效 TVT 网格不足")
+    return curve.sort_values("TVT")</code></pre>
+            <div class="step-detail-grid">
+              <div class="step-detail"><b>为什么取中位数</b><br>同一地层位置可能被水平井多次穿过，也可能有尖峰噪声；中位数比均值更不容易被极端值拉偏。</div>
+              <div class="step-guard"><b>失败保护</b><br>有效标注不足或聚合后少于 20 个 TVT 网格的训练井直接跳过，避免短曲线污染参考库。</div>
+            </div>
+          </div>
+        </details>
+
+        <details class="method-step">
+          <summary>
+            <span><span class="step-title">步骤三：从 32 口空间候选里选出最匹配的 3 口</span><span class="step-teaser">“离得近”只是初筛，最终必须在目标井已知前缀上证明自己的 GR 模式确实匹配。</span></span>
+          </summary>
+          <div class="step-body">
+            <p>邻近井的地层通常更相似，但最近的井不一定最像。先按地图距离找候选，再拿已经知道答案的前半段检验匹配程度。</p>
+            <p><b>具体计算：</b>用目标井 X/Y 中位数作为井中心，按平面距离取最近 32 口训练井；逐井把候选 GR 曲线插值到目标前缀的 <code>TVT_input</code>，稳健拟合 <code>目标GR ≈ a × 候选GR + b</code>，消除仪器增益和偏移差异。</p>
+            <div class="step-formula"><b>候选分数：</b>score = 前缀归一化 RMSE + 0.02 × log(1 + 距离/500) + 0.5 × (1 − 覆盖率)<br><b>融合权重：</b>wⱼ ∝ exp(−(scoreⱼ − 最佳score) / 0.15)</div>
+            <div class="code-caption">关键代码 · 用可见前缀给邻井打分并软融合</div>
+            <pre class="code-block"><code>def select_neighbor_reference(query, curves, typewell_gr):
+    <span class="code-comment"># 先按目标井中心位置取最近的 32 口候选井</span>
+    center = np.nanmedian(query[["X", "Y"]].to_numpy(float), axis=0)
+    ranked = rank_by_xy_distance(center, curves, exclude=query.well_id)[:32]
+
+    candidates = []
+    for distance, curve in ranked:
+        <span class="code-comment"># 只在已知 TVT 前缀上比较候选 GR，不能读取隐藏答案</span>
+        expected = interpolate_without_extrapolation(curve, query.prefix_tvt)
+        valid = np.isfinite(expected) &amp; np.isfinite(query.prefix_gr)
+        if valid.sum() &lt; 80:
+            continue
+
+        <span class="code-comment"># 稳健校准不同井之间的 GR 增益和偏移</span>
+        slope, offset = robust_affine(expected[valid], query.prefix_gr[valid])
+        residual = query.prefix_gr[valid] - (slope * expected[valid] + offset)
+        nrmse = rms(residual) / robust_scale(query.prefix_gr[valid])
+        coverage = valid.sum() / np.isfinite(query.prefix_gr).sum()
+        score = nrmse + 0.02 * np.log1p(distance / 500) + 0.5 * (1 - coverage)
+        profile = slope * interpolate_curve(curve, typewell_grid) + offset
+        candidates.append((score, profile))
+
+    <span class="code-comment"># 选择分数最低的 3 口，并用温度 0.15 转成软权重</span>
+    selected = sorted(candidates, key=lambda item: item[0])[:3]
+    neighbor_gr = soft_weighted_curve(selected, temperature=0.15)
+    return 0.50 * neighbor_gr + 0.50 * typewell_gr</code></pre>
+            <div class="step-detail-grid">
+              <div class="step-detail"><b>选完以后</b><br>取得分最低的 3 口井做软权重平均，再与目标井自带 typewell 各占 50%，得到回退参考曲线。</div>
+              <div class="step-detail"><b>为什么不是只选最近一口</b><br>距离只代表地理相近；前缀误差检查能识别局部断层、相变和测井尺度不同，多井融合也能降低单井偶然失配。</div>
+            </div>
+            <div class="step-guard"><b>失败保护：</b>强制排除与查询井同 ID 的训练文件；候选至少需要 80 行有效前缀匹配；没有合格邻井时完全回退到校准后的 typewell。</div>
+          </div>
+        </details>
+
+        <details class="method-step">
+          <summary>
+            <span><span class="step-title">步骤四：在有证据的范围内叠加本井前缀</span><span class="step-teaser">本井已钻前段最贴近本井地质，但只在真实覆盖到的位置使用，绝不远距离外推。</span></span>
+          </summary>
+          <div class="step-body">
+            <p>邻井提供附近区域的经验，目标井前缀提供当前井刚刚观察到的事实。本井前缀更相关，但只覆盖有限地层范围，超出范围后必须回退。</p>
+            <p><b>具体计算：</b>只取 Prediction Start 之前同时具有 <code>TVT_input</code> 和 GR 的行，按 0.5 ft TVT 网格聚合为本井前缀曲线。对参考网格中的每个 TVT，检查它是否位于前缀最小值与最大值之间，并计算到最近前缀网格的距离。</p>
+            <div class="step-formula"><b>有支持时：</b>GR_ref = 0.50 × GR_本井前缀 + 0.50 × GR_邻井/typewell<br><b>无支持时：</b>GR_ref = GR_邻井/typewell<br><b>支持条件：</b>位于前缀 TVT 范围内 且 最近网格距离 ≤ 2 ft</div>
+            <div class="code-caption">关键代码 · 仅在本井前缀真正覆盖的位置叠加参考</div>
+            <pre class="code-block"><code>def overlay_visible_prefix(horizontal, fallback, grid_tvt):
+    <span class="code-comment"># TVT_input 非空的位置就是模型允许使用的已知前缀</span>
+    known = horizontal["TVT_input"].notna() &amp; horizontal["GR"].notna()
+    prefix = pd.DataFrame({
+        "TVT": np.round(horizontal.loc[known, "TVT_input"] / 0.5) * 0.5,
+        "GR": horizontal.loc[known, "GR"],
+    }).groupby("TVT", as_index=False)["GR"].median()
+
+    <span class="code-comment"># 前缀太短时不冒险，直接保留邻井和 typewell 参考</span>
+    if len(prefix) &lt; 3:
+        return fallback.copy()
+
+    nearest_gap = distance_to_nearest(prefix["TVT"].to_numpy(), grid_tvt)
+    supported = (
+        (grid_tvt &gt;= prefix["TVT"].min())
+        &amp; (grid_tvt &lt;= prefix["TVT"].max())
+        &amp; (nearest_gap &lt;= 2.0)
+    )
+
+    <span class="code-comment"># 只修改有近距离观测支持的网格，范围外禁止外推</span>
+    prefix_gr = np.interp(grid_tvt, prefix["TVT"], prefix["GR"])
+    result = fallback.copy()
+    result[supported] = 0.50 * prefix_gr[supported] + 0.50 * fallback[supported]
+    return result</code></pre>
+            <div class="step-detail-grid">
+              <div class="step-detail"><b>为什么有效</b><br>它自动吸收目标井自己的 GR 尺度、局部沉积特征和相位，比任何外部参考都更贴近当前井。</div>
+              <div class="step-guard"><b>失败保护</b><br>前缀少于 3 个有效 TVT 网格时不叠加；覆盖范围外不做外推，直接使用步骤三的回退参考。</div>
+            </div>
+          </div>
+        </details>
+
+        <details class="method-step">
+          <summary>
+            <span><span class="step-title">步骤五：用 STRIDE-lite 搜索多条合理地层轨迹</span><span class="step-teaser">沿井分段前进，同时考虑 GR 匹配和地层变化连续性，而不是逐行独立猜 TVT。</span></span>
+          </summary>
+          <div class="step-body">
+            <p>单个 GR 数值可能在很多地层重复出现，逐点匹配很容易认错层段。算法保留多条候选路线，走过一段后再综合整段证据淘汰不合理路线。</p>
+            <div class="step-detail-grid">
+              <div class="step-detail"><b>搜索状态</b><br><code>U = TVT + Z</code> 表示地层面位置；<code>r = dU/dMD</code> 表示沿井前进时地层面的变化率。</div>
+              <div class="step-detail"><b>搜索起点</b><br>从最后一个已知 <code>TVT_input</code> 锚定 U，并根据可见前缀估计初始变化率。</div>
+            </div>
+            <p><b>具体计算：</b>每 120 行作为一个段。对 beam 中每条候选轨迹尝试若干变化率增量，推算段末 U；再把段内 U 插值成 TVT，通过步骤四的 <code>GR_ref(TVT)</code> 得到期望 GR，与真实水平井 GR 比较。每轮只保留累计代价最低的 192 条路径。</p>
+            <div class="step-formula"><b>段末状态：</b>U_end = U_start + r × ΔMD<br><b>总代价：</b>Cauchy 型 GR 失配代价 + 相邻段变化率持续性惩罚<br><b>计算规模：</b>120 行/段；每 4 行采样一次 GR；beam 192；最后保留前 32 条后验路径</div>
+            <div class="code-caption">关键代码 · 分段扩展候选路径并保留后验最优 beam</div>
+            <pre class="code-block"><code>def decode_with_beam(md, z, observed_gr, reference, initial_state):
+    beam = initialise_rate_hypotheses(initial_state)
+
+    <span class="code-comment"># 每 120 行作为一段，避免逐行搜索导致状态空间爆炸</span>
+    for left, right in segment_boundaries(len(md), rows=120):
+        expanded = []
+        for path in beam:
+            for rate_delta in RATE_DELTA_STEPS:
+                <span class="code-comment"># 地层变化率应缓慢变化，不能突然跳到任意方向</span>
+                rate = path.rate + rate_delta * RATE_STEP
+                if abs(rate) &gt; MAX_ABS_RATE:
+                    continue
+
+                end_u = path.u + rate * (md[right] - md[left])
+                gr_cost = cauchy_segment_cost(
+                    path.u, end_u, observed_gr, reference, stride=4
+                )
+                persistence = 0.5 * ((rate - path.rate) / RATE_SIGMA) ** 2
+                expanded.append(path.extend(end_u, rate, gr_cost + persistence))
+
+        <span class="code-comment"># 每段只保留累计代价最低的 192 条路径</span>
+        beam = sorted(expanded, key=lambda path: path.score)[:192]
+
+    <span class="code-comment"># 最优单路径给出 MAP，前 32 条加权平均给出 consensus</span>
+    best = sorted(beam, key=lambda path: path.score)[:32]
+    map_tvt = interpolate_path(best[0], md) - z
+    consensus_tvt = posterior_average(best, md) - z
+    return consensus_tvt, map_tvt</code></pre>
+            <div class="step-detail-grid">
+              <div class="step-detail"><b>两种输出</b><br><code>MAP</code> 是总代价最低的单条路径；<code>consensus</code> 是前 32 条路径按后验权重求平均，更平滑也更稳健。</div>
+              <div class="step-guard"><b>失败保护</b><br>Cauchy 代价降低 GR 尖峰影响；缺失 GR 自动跳过；变化率上限与持续性惩罚防止轨迹突然跳层。</div>
+            </div>
+          </div>
+        </details>
+
+        <details class="method-step">
+          <summary>
+            <span><span class="step-title">步骤六：用模型分歧决定修正多少</span><span class="step-teaser">新轨迹意见一致时正常采用，意见分裂时大幅减弱，最终仍由基础轨迹兜底。</span></span>
+          </summary>
+          <div class="step-body">
+            <p>如果最佳单路线和多路线平均答案差得很远，说明这口井存在多种同样合理的解释。此时不应大胆改动，而应更相信稳定基线。</p>
+            <p><b>具体计算：</b>先将 STRIDE 轨迹设为 <code>75% consensus + 25% MAP</code>。然后逐井计算两者差值的 RMS 作为不确定性；以当前测试井集合的不确定性第 85 百分位为阈值，高于阈值的井把修正倍率从 1.0 降为 0.25。</p>
+            <div class="step-formula"><b>不确定性：</b>u_w = RMS(TVT_consensus − TVT_MAP)<br><b>最终预测：</b>TVT_final = TVT_base + 0.425 × gate_w × clip(TVT_stride − TVT_base, −40, 40)<br><b>门控：</b>普通井 gate = 1.0；高分歧井 gate = 0.25</div>
+            <div class="code-caption">关键代码 · 根据两条后验轨迹的分歧限制最终修正</div>
+            <pre class="code-block"><code>def risk_gated_blend(base, consensus, map_path, threshold):
+    <span class="code-comment"># 共识轨迹更稳定，MAP 保留最优单路径的局部细节</span>
+    stride = 0.75 * consensus + 0.25 * map_path
+
+    <span class="code-comment"># 不看真实答案，只用两条预测的分歧衡量模型犹豫程度</span>
+    uncertainty = np.sqrt(np.mean((consensus - map_path) ** 2))
+    gate = 0.25 if uncertainty &gt; threshold else 1.0
+
+    <span class="code-comment"># 先把单行差异限制在正负 40 ft，再只采用 42.5%</span>
+    delta = np.clip(stride - base, -40.0, 40.0)
+    final = base + 0.425 * gate * delta
+    return final, uncertainty
+
+
+<span class="code-comment"># 阈值由当前测试井的不确定性分布得到，不使用隐藏 TVT</span>
+threshold = np.quantile(all_well_uncertainties, 0.85)</code></pre>
+            <div class="step-detail-grid">
+              <div class="step-detail"><b>数值例子</b><br>基础值 11750、STRIDE 值 11770，差 20 ft。普通井得到 11758.5；高分歧井只改到 11752.125。</div>
+              <div class="step-detail"><b>最大影响</b><br>即使两条轨迹相差 100 ft，也先截断成 40 ft：普通井最多移动 17 ft，高分歧井最多移动 4.25 ft。</div>
+            </div>
+            <div class="step-guard"><b>为什么没有泄漏：</b>门控只比较模型自己的两条预测，不读取测试井真实 TVT。它衡量的是模型是否犹豫，不是根据隐藏答案挑结果。</div>
+          </div>
+        </details>
+      </div>
+
+      <div class="final-formula"><strong>最终公式：</strong>预测 = 基础轨迹 + 0.425 × 风险门控 × clip(STRIDE − 基础轨迹, −40, 40)。</div>
+    </section>
+
+    <section id="results" class="report-section">
+      <h2 class="section-title">最终结果与验证</h2>
+      <div class="result-grid">
+        <div class="result-card"><strong>6.100</strong><span>Public RMSE</span></div>
+        <div class="result-card"><strong>8.074</strong><span>Private RMSE</span></div>
+        <div class="result-card"><strong>237</strong><span>回归测试通过</span></div>
+      </div>
+    </section>
+
+    <section id="limitations" class="report-section">
+      <h2 class="section-title">局限与复盘</h2>
+      <ul class="limitation-list">
+        <li><strong>本地验证偏乐观：</strong>按训练井模拟的隐藏后缀与真正隐藏井仍存在分布差异，因此本地误差不能直接等价为最终表现。</li>
+        <li><strong>空间近邻可能失配：</strong>地理距离相近不代表地层历史完全一致，断层和相变会让邻井参考产生偏差。</li>
+        <li><strong>GR 存在重复层段：</strong>相似 GR 模式可能出现在多个 TVT 位置，序列搜索仍可能发生层段混淆。</li>
+        <li><strong>门控是相对阈值：</strong>第 85 百分位由当前测试井集合决定，测试井构成变化会改变被衰减的井。</li>
+        <li><strong>基础轨迹仍有随机性：</strong>粒子滤波和集成模型存在方差，因此银牌方案使用截断与弱融合限制新增分支的影响。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="page-footer">ROGII Wellbore Geology Prediction · 银牌方案报告</footer>
+</body>
+</html>
