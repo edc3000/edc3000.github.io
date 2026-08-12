@@ -7,7 +7,7 @@ import { getCollection } from 'astro:content';
 const entries = (await getCollection('papers', ({ data }) => !data.draft))
   .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
 ---
-<BaseLayout title="论文精读 · edc3000" description="LLM、强化学习与多模态方向的论文精读笔记。">
+<BaseLayout title="论文精读 · Leo" description="LLM、强化学习与多模态方向的论文精读笔记。">
   <h1>论文精读</h1>
   {entries.length === 0 ? (
     <EmptySection heading="论文精读" note="这个板块还没有内容,有积累后会陆续加进来。" />

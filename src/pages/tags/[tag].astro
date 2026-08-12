@@ -14,7 +14,7 @@ export async function getStaticPaths() {
 
 const { tag, posts } = Astro.props;
 ---
-<BaseLayout title={`#${tag} · edc3000`} description={`标签 ${tag} 下的全部文章`}>
+<BaseLayout title={`#${tag} · Leo`} description={`标签 ${tag} 下的全部文章`}>
   <h1>#{tag}</h1>
   <p>{posts.length} 篇</p>
   {posts.map((p) => (

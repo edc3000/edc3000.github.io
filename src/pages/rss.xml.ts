@@ -5,7 +5,7 @@ import { getAllPosts } from '../lib/collections';
 export async function GET(context: APIContext) {
   const posts = await getAllPosts();
   return rss({
-    title: 'edc3000',
+    title: 'Leo',
     description: 'Kaggle 竞赛复盘、论文精读、算法实践与 AI Agent 技能包',
     site: context.site!,
     items: posts.map((p) => ({

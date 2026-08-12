@@ -7,12 +7,12 @@ import { getCollection } from 'astro:content';
 const entries = (await getCollection('competitions', ({ data }) => !data.draft))
   .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
 ---
-<BaseLayout title="竞赛实录 · edc3000" description="Kaggle 竞赛完整复盘:方案、迭代过程与失败记录。">
+<BaseLayout title="竞赛实录 · Leo" description="Kaggle 竞赛完整复盘:方案、迭代过程与失败记录。">
   <h1>竞赛实录</h1>
   <p>每篇都是完整复盘,包含最终方案、迭代路径,以及没能奏效的尝试。</p>
   {entries.map((entry) => (
     <PostCard
-      href={`/competitions/${entry.id}/`}
+      href={entry.data.richReport ?? `/competitions/${entry.id}/`}
       title={entry.data.title}
       description={entry.data.description}
       date={entry.data.date}

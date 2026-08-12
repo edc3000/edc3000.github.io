@@ -7,7 +7,7 @@ import { getCollection } from 'astro:content';
 const entries = (await getCollection('algorithms', ({ data }) => !data.draft))
   .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
 ---
-<BaseLayout title="算法实践 · edc3000" description="算法与工程实践:实现细节、性能取舍与踩坑记录。">
+<BaseLayout title="算法实践 · Leo" description="算法与工程实践:实现细节、性能取舍与踩坑记录。">
   <h1>算法实践</h1>
   {entries.length === 0 ? (
     <EmptySection heading="算法实践" note="这个板块还没有内容,有积累后会陆续加进来。" />

@@ -28,13 +28,20 @@ export const SECTION_BLURB: Record<Section, string> = {
   skills: 'Claude Code / AI Agent 技能包',
 };
 
+function richReportOf(data: unknown): string | undefined {
+  return typeof data === 'object' && data !== null && 'richReport' in data
+    ? ((data as { richReport?: string }).richReport ?? undefined)
+    : undefined;
+}
+
 export async function getAllPosts(): Promise<UnifiedPost[]> {
   const groups = await Promise.all(
     SECTIONS.map(async (section) => {
       const entries = await getCollection(section, ({ data }) => !data.draft);
       return entries.map((entry) => ({
         id: entry.id,
-        href: `/${section}/${entry.id}/`,
+        // 有精排版的文章,对外链接直接指向精排版;Markdown 详情页仍构建,承载全文搜索索引
+        href: richReportOf(entry.data) ?? `/${section}/${entry.id}/`,
         title: entry.data.title,
         description: entry.data.description,
         date: entry.data.date,
