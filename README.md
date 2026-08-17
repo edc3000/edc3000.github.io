@@ -32,6 +32,10 @@ git push
 
 ### 各板块 frontmatter
 
+四个板块共有 `title` / `date` / `description` / `tags` / `draft` / `richReport`,
+下面各例只列出该板块特有的字段。`richReport` 四个板块通用,填了就跳精排版 HTML,
+下方示例中只在竞赛里写出。
+
 竞赛(`privateLB` / `rankNote` / `richReport` 可选):
 
 ```yaml
