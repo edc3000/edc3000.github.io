@@ -14,7 +14,7 @@ const entries = (await getCollection('papers', ({ data }) => !data.draft))
   ) : (
     entries.map((entry) => (
       <PostCard
-        href={`/papers/${entry.id}/`}
+        href={entry.data.richReport ?? `/papers/${entry.id}/`}
         title={entry.data.title}
         description={entry.data.description}
         date={entry.data.date}

@@ -1,10 +1,11 @@
 ---
 import PostLayout from '../../layouts/PostLayout.astro';
 import { getCollection, render } from 'astro:content';
+import { needsDetailPage } from '../../lib/collections';
 
 export async function getStaticPaths() {
   const entries = await getCollection('algorithms', ({ data }) => !data.draft);
-  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+  return entries.filter(needsDetailPage).map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
 }
 
 const { entry } = Astro.props;

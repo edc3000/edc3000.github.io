@@ -14,7 +14,7 @@ const entries = (await getCollection('algorithms', ({ data }) => !data.draft))
   ) : (
     entries.map((entry) => (
       <PostCard
-        href={`/algorithms/${entry.id}/`}
+        href={entry.data.richReport ?? `/algorithms/${entry.id}/`}
         title={entry.data.title}
         description={entry.data.description}
         date={entry.data.date}

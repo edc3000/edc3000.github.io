@@ -34,6 +34,18 @@ function richReportOf(data: unknown): string | undefined {
     : undefined;
 }
 
+/**
+ * 档案卡条目(Markdown 正文为空,正文写在 richReport 指向的 HTML 里)不生成详情页:
+ * 那样的详情页没有任何入口,却仍带 data-pagefind-body 被搜索索引,
+ * 使同一篇内容出现两条命中,其中一条点开是空页。
+ *
+ * 正文为空但没有 richReport 时照常生成——否则列表页链接会指向不存在的页面。
+ */
+export function needsDetailPage(entry: { body?: string; data: unknown }): boolean {
+  const hasBody = (entry.body ?? '').trim().length > 0;
+  return hasBody || richReportOf(entry.data) === undefined;
+}
+
 export async function getAllPosts(): Promise<UnifiedPost[]> {
   const groups = await Promise.all(
     SECTIONS.map(async (section) => {
