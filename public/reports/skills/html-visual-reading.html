@@ -1,0 +1,1558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="HTML 可视化解读 skill：用五份契约、材料驱动叙事与四层验证，把长文和工程项目变成真正帮助理解的单文件教学页面。">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2394441f'/%3E%3Cpath d='M18 17h22a7 7 0 0 1 7 7v23H24a6 6 0 0 1-6-6V17Zm6 7v17h16V24H24Z' fill='%23fffdf8'/%3E%3C/svg%3E">
+  <title>HTML 可视化解读｜Skill 深度解读</title>
+  <style>
+    :root {
+      --bg: #faf7f0;
+      --surface: #fffdf8;
+      --surface-strong: #ffffff;
+      --surface-soft: #f4eee2;
+      --line: #e8e0cc;
+      --line-strong: #d3c4a7;
+      --text: #1a1816;
+      --muted: #6b6660;
+      --accent: #cc6a3d;
+      --accent-soft: #f4e3d7;
+      --accent-ink: #94441f;
+      --dark: #29241f;
+      --dark-soft: #3b342e;
+      --shadow: 0 14px 42px rgba(65, 50, 34, 0.08);
+      --radius-lg: 24px;
+      --radius-md: 16px;
+      --radius-sm: 10px;
+      --content: 1120px;
+      --reading: 760px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 88px;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family: Inter, "Noto Sans SC", -apple-system, "PingFang SC", system-ui, sans-serif;
+      line-height: 1.75;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a {
+      color: var(--accent-ink);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    a:hover {
+      text-decoration-thickness: 2px;
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(148, 68, 31, 0.34);
+      outline-offset: 3px;
+    }
+
+    code,
+    pre,
+    .mono {
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    code {
+      padding: 0.12em 0.38em;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface-soft);
+      font-size: 0.88em;
+      overflow-wrap: anywhere;
+    }
+
+    pre {
+      margin: 0;
+      padding: 20px 22px;
+      overflow: auto;
+      border-radius: var(--radius-sm);
+      color: #fff8ec;
+      background: var(--dark);
+      font-size: 0.84rem;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    pre code {
+      padding: 0;
+      border: 0;
+      color: inherit;
+      background: transparent;
+      font-size: inherit;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      max-width: 920px;
+      margin-bottom: 24px;
+      font-size: clamp(2.55rem, 6.5vw, 5.6rem);
+      line-height: 1.02;
+      letter-spacing: -0.058em;
+    }
+
+    h2 {
+      margin-bottom: 18px;
+      font-size: clamp(1.75rem, 3.6vw, 2.72rem);
+      line-height: 1.18;
+      letter-spacing: -0.035em;
+    }
+
+    h3 {
+      margin-bottom: 10px;
+      font-size: 1.14rem;
+      line-height: 1.45;
+    }
+
+    p:last-child,
+    ul:last-child {
+      margin-bottom: 0;
+    }
+
+    strong {
+      font-weight: 760;
+    }
+
+    .shell {
+      width: min(calc(100% - 40px), var(--content));
+      margin-inline: auto;
+    }
+
+    .reading {
+      max-width: var(--reading);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 18px;
+      color: var(--accent-ink);
+      font-size: 0.78rem;
+      font-weight: 760;
+      letter-spacing: 0.11em;
+    }
+
+    .eyebrow::before {
+      width: 28px;
+      height: 2px;
+      content: "";
+      background: var(--accent);
+    }
+
+    .hero {
+      position: relative;
+      padding: 86px 0 58px;
+      overflow: hidden;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .hero::after {
+      position: absolute;
+      top: 72px;
+      right: max(3vw, calc((100vw - var(--content)) / 2));
+      width: 220px;
+      height: 220px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      content: "";
+      opacity: 0.7;
+      box-shadow: inset 0 0 0 30px var(--bg), inset 0 0 0 31px var(--line);
+      pointer-events: none;
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero .lead {
+      max-width: 760px;
+      margin-bottom: 26px;
+      color: #49443f;
+      font-size: clamp(1.06rem, 2vw, 1.28rem);
+      line-height: 1.75;
+    }
+
+    .hero-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .button-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 10px 16px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      color: var(--text);
+      background: var(--surface-strong);
+      font-size: 0.9rem;
+      font-weight: 720;
+      text-decoration: none;
+    }
+
+    .button-link.primary {
+      border-color: var(--accent-ink);
+      color: #ffffff;
+      background: var(--accent-ink);
+    }
+
+    .meta-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      margin-top: 32px;
+      color: var(--muted);
+      font-size: 0.83rem;
+    }
+
+    .meta-line span {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      margin-top: 48px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 22px;
+      background: var(--surface-strong);
+    }
+
+    .metric-value {
+      display: block;
+      margin-bottom: 4px;
+      font-size: clamp(1.8rem, 4vw, 2.8rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+      overflow-wrap: anywhere;
+    }
+
+    .metric-label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.82rem;
+      overflow-wrap: anywhere;
+    }
+
+    .topnav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(211, 196, 167, 0.8);
+      background: rgba(250, 247, 240, 0.94);
+      backdrop-filter: blur(12px);
+    }
+
+    .topnav-inner {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      min-height: 64px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .topnav-inner::-webkit-scrollbar {
+      display: none;
+    }
+
+    .topnav a {
+      flex: 0 0 auto;
+      padding: 7px 11px;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 0.79rem;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .topnav a:hover {
+      color: var(--text);
+      background: var(--accent-soft);
+    }
+
+    main section {
+      padding: 88px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-intro {
+      max-width: var(--reading);
+      margin-bottom: 34px;
+      color: #4f4943;
+      font-size: 1.03rem;
+    }
+
+    .core-answer {
+      display: grid;
+      grid-template-columns: 0.72fr 1.28fr;
+      gap: 34px;
+      padding: 32px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background: var(--surface-strong);
+      box-shadow: var(--shadow);
+    }
+
+    .core-answer .label {
+      color: var(--accent-ink);
+      font-size: 0.75rem;
+      font-weight: 780;
+      letter-spacing: 0.1em;
+    }
+
+    .core-answer blockquote {
+      margin: 0;
+      font-size: clamp(1.35rem, 3vw, 2.15rem);
+      font-weight: 730;
+      line-height: 1.45;
+      letter-spacing: -0.025em;
+    }
+
+    .core-answer p {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .failure-chain {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 34px 0;
+    }
+
+    .failure-step {
+      position: relative;
+      min-width: 0;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+    }
+
+    .failure-step:not(:last-child)::after {
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      z-index: 2;
+      width: 12px;
+      height: 1px;
+      content: "";
+      background: var(--line-strong);
+    }
+
+    .failure-step .num {
+      display: block;
+      margin-bottom: 24px;
+      color: var(--accent-ink);
+      font-size: 0.76rem;
+      font-weight: 800;
+    }
+
+    .failure-step strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .failure-step p {
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.6;
+    }
+
+    .prose-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-top: 34px;
+    }
+
+    .prose-panel {
+      min-width: 0;
+      padding: 28px;
+      border-top: 3px solid var(--accent);
+      border-radius: 0 0 var(--radius-md) var(--radius-md);
+      background: var(--surface-strong);
+    }
+
+    .prose-panel .kicker {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--accent-ink);
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+    }
+
+    .prose-panel p,
+    .prose-panel li {
+      color: #514b45;
+      font-size: 0.93rem;
+    }
+
+    .contract-gate {
+      margin-top: 38px;
+      padding: 28px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+    }
+
+    .contract-row {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .contract-item {
+      min-width: 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface-strong);
+    }
+
+    .contract-item b {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 0.9rem;
+    }
+
+    .contract-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.55;
+    }
+
+    .gate-bar {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      margin-top: 18px;
+      padding: 15px 18px;
+      border-radius: var(--radius-sm);
+      color: var(--surface-strong);
+      background: var(--dark);
+    }
+
+    .gate-bar strong {
+      flex: 0 0 auto;
+    }
+
+    .gate-bar span {
+      color: #ded3c5;
+      font-size: 0.86rem;
+    }
+
+    .stage-shell {
+      margin-top: 34px;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background: var(--surface-strong);
+      box-shadow: var(--shadow);
+    }
+
+    .stage-tabs {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 1px;
+      padding: 1px;
+      background: var(--line);
+    }
+
+    .stage-tab {
+      min-width: 0;
+      min-height: 82px;
+      padding: 12px 8px;
+      border: 0;
+      color: var(--muted);
+      background: var(--surface);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .stage-tab span {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.7rem;
+      font-weight: 800;
+    }
+
+    .stage-tab b {
+      display: block;
+      font-size: 0.83rem;
+      overflow-wrap: anywhere;
+    }
+
+    .stage-tab[aria-selected="true"] {
+      color: var(--text);
+      background: var(--accent-soft);
+      box-shadow: inset 0 -3px 0 var(--accent-ink);
+    }
+
+    .stage-panel {
+      display: grid;
+      grid-template-columns: 0.85fr 1.15fr;
+      gap: 36px;
+      min-height: 270px;
+      padding: 34px;
+    }
+
+    .stage-panel[hidden] {
+      display: none;
+    }
+
+    .stage-question {
+      color: var(--accent-ink);
+      font-size: 0.8rem;
+      font-weight: 780;
+      letter-spacing: 0.06em;
+    }
+
+    .stage-panel h3 {
+      margin-top: 8px;
+      font-size: clamp(1.35rem, 2.8vw, 2rem);
+      letter-spacing: -0.02em;
+    }
+
+    .io-list {
+      display: grid;
+      gap: 12px;
+      margin: 0;
+    }
+
+    .io-list div {
+      display: grid;
+      grid-template-columns: 74px 1fr;
+      gap: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .io-list dt {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 760;
+    }
+
+    .io-list dd {
+      margin: 0;
+      font-size: 0.9rem;
+      overflow-wrap: anywhere;
+    }
+
+    .module-map {
+      margin-top: 38px;
+      padding: 30px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .map-entry {
+      width: min(100%, 480px);
+      margin: 0 auto;
+      padding: 16px 20px;
+      border: 1px solid var(--accent-ink);
+      border-radius: var(--radius-md);
+      text-align: center;
+      background: var(--accent-soft);
+    }
+
+    .map-entry span,
+    .map-group > span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .map-stem {
+      width: 1px;
+      height: 28px;
+      margin: 0 auto;
+      background: var(--line-strong);
+    }
+
+    .map-groups {
+      display: grid;
+      grid-template-columns: 0.85fr 1.2fr 1.45fr;
+      gap: 16px;
+      position: relative;
+    }
+
+    .map-groups::before {
+      position: absolute;
+      top: -1px;
+      left: 16.66%;
+      right: 16.66%;
+      height: 1px;
+      content: "";
+      background: var(--line-strong);
+    }
+
+    .map-group {
+      position: relative;
+      min-width: 0;
+      padding: 28px 18px 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--surface-strong);
+    }
+
+    .map-group::before {
+      position: absolute;
+      top: -1px;
+      left: 50%;
+      width: 1px;
+      height: 18px;
+      content: "";
+      background: var(--line-strong);
+    }
+
+    .map-group h3 {
+      margin-bottom: 4px;
+      text-align: center;
+    }
+
+    .file-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .file-pill {
+      min-width: 0;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+    }
+
+    .file-pill code {
+      display: block;
+      width: max-content;
+      max-width: 100%;
+      margin-bottom: 4px;
+      color: var(--accent-ink);
+      background: transparent;
+    }
+
+    .file-pill span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.5;
+    }
+
+    .readme-node {
+      margin-top: 16px;
+      padding: 15px;
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius-sm);
+      color: #4f4943;
+      text-align: center;
+      background: var(--surface-soft);
+      font-size: 0.86rem;
+    }
+
+    .map-caption {
+      max-width: 760px;
+      margin: 22px auto 0;
+      color: var(--muted);
+      text-align: center;
+      font-size: 0.84rem;
+    }
+
+    .example-path {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin: 34px 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: example;
+    }
+
+    .example-path li {
+      position: relative;
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--surface-strong);
+      counter-increment: example;
+    }
+
+    .example-path li::before {
+      display: block;
+      margin-bottom: 18px;
+      color: var(--accent-ink);
+      content: "0" counter(example);
+      font-size: 0.76rem;
+      font-weight: 800;
+    }
+
+    .example-path li:not(:last-child)::after {
+      position: absolute;
+      top: 34px;
+      right: -13px;
+      z-index: 2;
+      width: 13px;
+      height: 1px;
+      content: "";
+      background: var(--line-strong);
+    }
+
+    .example-path strong,
+    .example-path span {
+      display: block;
+    }
+
+    .example-path span {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+
+    .source-details {
+      margin-top: 22px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--surface-strong);
+    }
+
+    .source-details summary {
+      padding: 18px 20px;
+      color: var(--accent-ink);
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    .summary-note {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 0.79rem;
+      font-weight: 500;
+    }
+
+    .source-details .details-body {
+      padding: 0 20px 20px;
+    }
+
+    .source-table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.86rem;
+    }
+
+    th,
+    td {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.73rem;
+      letter-spacing: 0.05em;
+    }
+
+    td {
+      min-width: 150px;
+    }
+
+    .tradeoffs {
+      display: grid;
+      gap: 1px;
+      margin-top: 34px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--line);
+    }
+
+    .tradeoff {
+      display: grid;
+      grid-template-columns: 0.72fr 1fr 1fr;
+      gap: 24px;
+      min-width: 0;
+      padding: 24px;
+      background: var(--surface-strong);
+    }
+
+    .tradeoff h3,
+    .tradeoff p {
+      margin: 0;
+    }
+
+    .tradeoff p {
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .tradeoff .gain::before,
+    .tradeoff .cost::before {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--accent-ink);
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+    }
+
+    .tradeoff .gain::before {
+      content: "换来";
+    }
+
+    .tradeoff .cost::before {
+      content: "代价";
+    }
+
+    .evidence-note {
+      margin-top: 24px;
+      padding: 18px 20px;
+      border-left: 3px solid var(--accent);
+      background: var(--accent-soft);
+      color: #51483f;
+      font-size: 0.88rem;
+    }
+
+    .decision-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 34px;
+    }
+
+    .decision {
+      min-width: 0;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--surface-strong);
+    }
+
+    .decision.no {
+      background: var(--dark);
+      color: #fff8ec;
+    }
+
+    .decision.no p,
+    .decision.no li {
+      color: #d9cfc3;
+    }
+
+    .decision ul {
+      margin: 16px 0 0;
+      padding-left: 1.2em;
+    }
+
+    .decision li + li {
+      margin-top: 8px;
+    }
+
+    .footer {
+      padding: 52px 0 70px;
+    }
+
+    .footer-inner {
+      display: flex;
+      gap: 28px;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .footer p {
+      max-width: 650px;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .footer a {
+      flex: 0 0 auto;
+      font-size: 0.87rem;
+      font-weight: 720;
+    }
+
+    @media (max-width: 880px) {
+      .hero {
+        padding-top: 64px;
+      }
+
+      .hero::after {
+        top: 36px;
+        right: -100px;
+      }
+
+      .metrics,
+      .failure-chain,
+      .prose-grid,
+      .decision-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .contract-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .contract-item:last-child {
+        grid-column: 1 / -1;
+      }
+
+      .stage-tabs {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .stage-panel,
+      .core-answer {
+        grid-template-columns: 1fr;
+      }
+
+      .map-groups {
+        grid-template-columns: 1fr;
+      }
+
+      .map-groups::before,
+      .map-group::before,
+      .failure-step::after,
+      .example-path li::after {
+        display: none;
+      }
+
+      .map-group {
+        padding-top: 20px;
+      }
+
+      .example-path {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .example-path li:last-child {
+        grid-column: 1 / -1;
+      }
+
+      .tradeoff {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .tradeoff h3 {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .shell {
+        width: min(calc(100% - 28px), var(--content));
+      }
+
+      h1 {
+        font-size: clamp(2.45rem, 15vw, 4rem);
+      }
+
+      main section {
+        padding: 66px 0;
+      }
+
+      .metrics,
+      .failure-chain,
+      .prose-grid,
+      .contract-row,
+      .stage-tabs,
+      .example-path,
+      .decision-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .contract-item:last-child,
+      .example-path li:last-child {
+        grid-column: auto;
+      }
+
+      .metric,
+      .core-answer,
+      .contract-gate,
+      .stage-panel,
+      .module-map,
+      .decision {
+        padding: 22px;
+      }
+
+      .stage-tab {
+        min-height: 60px;
+        text-align: left;
+      }
+
+      .stage-tab span,
+      .stage-tab b {
+        display: inline;
+      }
+
+      .stage-tab span {
+        margin-right: 8px;
+      }
+
+      .gate-bar,
+      .footer-inner {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .tradeoff {
+        grid-template-columns: 1fr;
+      }
+
+      .tradeoff h3 {
+        grid-column: auto;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body data-pagefind-body>
+  <header class="hero">
+    <div class="shell hero-copy">
+      <span class="eyebrow">SKILL 深度解读 · 2026.08</span>
+      <h1>先让读者读懂，<br>再谈可视化。</h1>
+      <p class="lead">
+        <strong>HTML 可视化解读</strong>不是一套页面模板，而是一套生成纪律：先固定读者、术语、数据流、例子和主线，再让材料决定页面结构，最后用浏览器验证“真的能读、真的能用”。
+      </p>
+      <div class="hero-links">
+        <a class="button-link primary" href="https://github.com/edc3000/html-visual-reading">阅读源仓库 ↗</a>
+        <a class="button-link" href="#flow">跟着一次任务走</a>
+      </div>
+      <div class="meta-line" aria-label="项目元信息">
+        <span>文档型 Agent Skill</span>
+        <span>11 份内容文档 · 1,807 行 Markdown</span>
+        <span>零运行时依赖</span>
+        <span>最近更新：2026-08-17</span>
+      </div>
+      <div class="metrics" aria-label="关键规模">
+        <div class="metric">
+          <span class="metric-value">5</span>
+          <span class="metric-label">份写作前契约</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value">7</span>
+          <span class="metric-label">个端到端阶段</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value">3</span>
+          <span class="metric-label">条专项路线</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value">4</span>
+          <span class="metric-label">层交付验证</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="topnav" aria-label="页面导航">
+    <div class="shell topnav-inner">
+      <a href="#answer">核心判断</a>
+      <a href="#problem">为什么需要</a>
+      <a href="#pillars">两根承重柱</a>
+      <a href="#flow">七步流程</a>
+      <a href="#architecture">文档如何协作</a>
+      <a href="#example">本次任务实例</a>
+      <a href="#tradeoffs">关键取舍</a>
+      <a href="#boundary">适用边界</a>
+    </div>
+  </nav>
+
+  <main>
+    <section id="answer">
+      <div class="shell">
+        <div class="core-answer">
+          <div>
+            <span class="label">核心结论</span>
+          </div>
+          <div>
+            <blockquote>它真正优化的不是 HTML 的“好看程度”，而是读者从陌生材料走到正确心智模型的路径。</blockquote>
+            <p>视觉组件只是末端手段。五份契约减少方向性返工，材料驱动的 section 保住原作逻辑，四层验证拦住语法、布局和理解层面的失败。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="problem">
+      <div class="shell">
+        <span class="eyebrow">01 · 问题</span>
+        <h2>普通“可视化解读”为什么经常只剩外观</h2>
+        <p class="section-intro">
+          常见做法直接从“页面应该放哪些组件”开始。这样生成出的内容可能很丰富，却让读者自己承担组织信息的工作：找主线、补概念边界、猜流程、再判断页面是否可信。
+        </p>
+
+        <div class="failure-chain" aria-label="失败链条">
+          <article class="failure-step">
+            <span class="num">01</span>
+            <strong>模板先于材料</strong>
+            <p>先决定卡片、时间线和总结章，再把内容塞进去。</p>
+          </article>
+          <article class="failure-step">
+            <span class="num">02</span>
+            <strong>主线被切碎</strong>
+            <p>关键论证散在折叠卡片里，读者必须点击拼图。</p>
+          </article>
+          <article class="failure-step">
+            <span class="num">03</span>
+            <strong>概念边界漂移</strong>
+            <p>相邻术语被翻成同一个词，流程对象也说不清。</p>
+          </article>
+          <article class="failure-step">
+            <span class="num">04</span>
+            <strong>交付未经运行</strong>
+            <p>静态看似完整，JS、图片或窄屏布局却可能已经失效。</p>
+          </article>
+        </div>
+
+        <div class="reading">
+          <p>
+            这个 skill 的解决方式是把问题前移：<strong>页面结构不再是起点，而是理解材料之后得到的答案</strong>。它要求正文承担主线，图只负责把抽象关系具体化，卡片只负责加深已经建立的理解。把所有折叠区域收起，读者仍应能从头到尾复述核心论证。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="pillars">
+      <div class="shell">
+        <span class="eyebrow">02 · 机制</span>
+        <h2>五份契约与四层验证，是两根承重柱</h2>
+        <p class="section-intro">
+          七步流程里，只有两个环节不能靠经验略过：写作前必须停下来让用户确认方向，交付前必须让页面真正运行起来。一个拦截“做错页面”，另一个拦截“页面做坏了”。
+        </p>
+
+        <div class="prose-grid">
+          <article class="prose-panel">
+            <span class="kicker">写作之前</span>
+            <h3>契约把模糊要求变成可检查的理解目标</h3>
+            <p>读者契约防止解释密度失衡；术语契约固定概念边界；数据流契约强迫作者说清读、改、写；贯穿例子把抽象流程落到真实对象；主线契约决定哪些内容值得默认展开。</p>
+          </article>
+          <article class="prose-panel">
+            <span class="kicker">交付之前</span>
+            <h3>验证把“看起来完成”变成“有证据完成”</h3>
+            <p>静态检查抓字符串、外链和 DOM 结构；运行时检查打开所有交互并扫三档宽度；内容检查回对原材料；读者理解检查确认读者能说出对象、状态和边界。</p>
+          </article>
+        </div>
+
+        <div class="contract-gate">
+          <h3>五份契约先对齐，HTML 才能开工</h3>
+          <div class="contract-row" aria-label="五份契约">
+            <div class="contract-item">
+              <b>读者</b>
+              <span>什么可直接说，什么必须解释</span>
+            </div>
+            <div class="contract-item">
+              <b>术语</b>
+              <span>3–8 个骨干概念及其边界</span>
+            </div>
+            <div class="contract-item">
+              <b>数据流</b>
+              <span>每阶段读取、修改与输出什么</span>
+            </div>
+            <div class="contract-item">
+              <b>贯穿例子</b>
+              <span>真实输入如何一步步成为产物</span>
+            </div>
+            <div class="contract-item">
+              <b>主线</b>
+              <span>全文共同回答的一个问题</span>
+            </div>
+          </div>
+          <div class="gate-bar">
+            <strong>确认闸门</strong>
+            <span>契约写完必须暂停。用户明确同意后，才进入 section 与组件设计。</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="flow">
+      <div class="shell">
+        <span class="eyebrow">03 · 数据流</span>
+        <h2>一次任务从陌生材料走到可交付页面</h2>
+        <p class="section-intro">
+          下面的七个节点不是抽象标签：每一步都写明它读取什么、改变什么、留下什么。点击阶段可查看状态变化；不点击也能从这段主线看懂：材料先被分类和取材，契约确认后才设计与写作，最后通过验证进入交付。
+        </p>
+
+        <div class="stage-shell">
+          <div class="stage-tabs" role="tablist" aria-label="七步流程">
+            <button class="stage-tab" id="tab-1" type="button" role="tab" aria-selected="true" aria-controls="panel-1" data-toggle="stage" data-stage="1"><span>01</span><b>取材</b></button>
+            <button class="stage-tab" id="tab-2" type="button" role="tab" aria-selected="false" aria-controls="panel-2" data-toggle="stage" data-stage="2"><span>02</span><b>定契约</b></button>
+            <button class="stage-tab" id="tab-3" type="button" role="tab" aria-selected="false" aria-controls="panel-3" data-toggle="stage" data-stage="3"><span>03</span><b>阅读路径</b></button>
+            <button class="stage-tab" id="tab-4" type="button" role="tab" aria-selected="false" aria-controls="panel-4" data-toggle="stage" data-stage="4"><span>04</span><b>选图解</b></button>
+            <button class="stage-tab" id="tab-5" type="button" role="tab" aria-selected="false" aria-controls="panel-5" data-toggle="stage" data-stage="5"><span>05</span><b>写页面</b></button>
+            <button class="stage-tab" id="tab-6" type="button" role="tab" aria-selected="false" aria-controls="panel-6" data-toggle="stage" data-stage="6"><span>06</span><b>验证</b></button>
+            <button class="stage-tab" id="tab-7" type="button" role="tab" aria-selected="false" aria-controls="panel-7" data-toggle="stage" data-stage="7"><span>07</span><b>交付</b></button>
+          </div>
+
+          <article class="stage-panel" id="panel-1" role="tabpanel" aria-labelledby="tab-1">
+            <div>
+              <span class="stage-question">先判断输入形态</span>
+              <h3>取材不是全文扫一遍，而是按输入类型找主线素材</h3>
+              <p>URL 抓正文，论文优先 HTML 版；本地项目先看 README、目录、入口、配置和示例。动手画图前先找原作者已有的图。</p>
+            </div>
+            <dl class="io-list">
+              <div><dt>读取</dt><dd>URL、文本、论文或项目目录</dd></div>
+              <div><dt>修改</dt><dd>把原始材料整理成问题、结构、证据和可用图像</dd></div>
+              <div><dt>输出</dt><dd>一份足以复述材料核心的定向素材集</dd></div>
+            </dl>
+          </article>
+
+          <article class="stage-panel" id="panel-2" role="tabpanel" aria-labelledby="tab-2" hidden>
+            <div>
+              <span class="stage-question">唯一的用户确认点</span>
+              <h3>把理解目标写成五份契约，然后暂停</h3>
+              <p>这一步冻结读者画像、核心术语、真实数据流、贯穿例子和一个核心问题。若用户不确认，就回到取材或修订契约。</p>
+            </div>
+            <dl class="io-list">
+              <div><dt>读取</dt><dd>定向素材集与用户指定的读者需求</dd></div>
+              <div><dt>修改</dt><dd>把“讲清楚”改写成可检查的理解目标</dd></div>
+              <div><dt>输出</dt><dd>用户明确确认的五份契约</dd></div>
+            </dl>
+          </article>
+
+          <article class="stage-panel" id="panel-3" role="tabpanel" aria-labelledby="tab-3" hidden>
+            <div>
+              <span class="stage-question">主线优先于组件</span>
+              <h3>先结论，再连续叙事，最后按需深入</h3>
+              <p>section 的数量、顺序与名字都由材料决定。每个默认展开的部分必须回答核心问题，不能服务主线的内容就删除或降为补充。</p>
+            </div>
+            <dl class="io-list">
+              <div><dt>读取</dt><dd>主线契约与材料中的必要证据</dd></div>
+              <div><dt>修改</dt><dd>按 30 秒、3–5 分钟、按需深读三层组织内容</dd></div>
+              <div><dt>输出</dt><dd>收起所有折叠区后仍完整的正文骨架</dd></div>
+            </dl>
+          </article>
+
+          <article class="stage-panel" id="panel-4" role="tabpanel" aria-labelledby="tab-4" hidden>
+            <div>
+              <span class="stage-question">视觉必须回答问题</span>
+              <h3>关系决定图形，不是组件库决定页面</h3>
+              <p>并列关系用卡片，链式关系用流程图，层级关系用树；动画只有在展示真实状态变化时才成立。一屏至多一个视觉锚点。</p>
+            </div>
+            <dl class="io-list">
+              <div><dt>读取</dt><dd>正文骨架与每块内容承担的角色</dd></div>
+              <div><dt>修改</dt><dd>把抽象依赖、时序或对比映射为合适图形</dd></div>
+              <div><dt>输出</dt><dd>最少且足够的可视化方案</dd></div>
+            </dl>
+          </article>
+
+          <article class="stage-panel" id="panel-5" role="tabpanel" aria-labelledby="tab-5" hidden>
+            <div>
+              <span class="stage-question">单文件、中文、低饱和</span>
+              <h3>把 CSS、JS 和图形全部内联进一个 HTML</h3>
+              <p>页面使用系统字体、内联 SVG 或 CSS 图形，不依赖 CDN。强调依靠字号、字重和留白，交互只做展开、淡入与必要的状态切换。</p>
+            </div>
+            <dl class="io-list">
+              <div><dt>读取</dt><dd>正文骨架、可视化方案与中文行文规则</dd></div>
+              <div><dt>修改</dt><dd>把内容与交互实现为自包含页面</dd></div>
+              <div><dt>输出</dt><dd>无需构建、双击即可打开的 HTML</dd></div>
+            </dl>
+          </article>
+
+          <article class="stage-panel" id="panel-6" role="tabpanel" aria-labelledby="tab-6" hidden>
+            <div>
+              <span class="stage-question">四层逐个放行</span>
+              <h3>默认态、展开态和三档宽度都要真正运行</h3>
+              <p>静态规则通过不代表脚本能跑。浏览器会在 375、880、1440 像素下打开全部交互，捕获 Console、外部请求、资源失败和横向溢出。</p>
+            </div>
+            <dl class="io-list">
+              <div><dt>读取</dt><dd>完整 HTML 与原始材料</dd></div>
+              <div><dt>修改</dt><dd>根据静态、运行时、内容与理解检查修正页面</dd></div>
+              <div><dt>输出</dt><dd>有验证证据的可交付版本</dd></div>
+            </dl>
+          </article>
+
+          <article class="stage-panel" id="panel-7" role="tabpanel" aria-labelledby="tab-7" hidden>
+            <div>
+              <span class="stage-question">如实报告验证边界</span>
+              <h3>交付页面、验证结果和可访问地址</h3>
+              <p>报告实际跑过哪些检查、修过什么、哪些没跑成；再给出少量可迭代方向和局域网访问地址，不自动扩写无关文档。</p>
+            </div>
+            <dl class="io-list">
+              <div><dt>读取</dt><dd>通过验证的 HTML 与检查记录</dd></div>
+              <div><dt>修改</dt><dd>不再修改内容，只整理可追溯的交付信息</dd></div>
+              <div><dt>输出</dt><dd>单文件页面、访问地址与真实验证报告</dd></div>
+            </dl>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <div class="shell">
+        <span class="eyebrow">04 · 文档架构</span>
+        <h2>一个入口负责原则，九份 reference 负责判断</h2>
+        <p class="section-intro">
+          当前仓库没有构建脚本和固定 HTML 骨架。<code>SKILL.md</code> 只保存不会随材料变化的原则；真正需要按场景展开的判断被拆到九份 reference，避免入口文件膨胀成难以执行的长清单。
+        </p>
+
+        <div class="module-map" aria-label="文档职责关系图">
+          <div class="map-entry">
+            <strong>SKILL.md · 执行入口</strong>
+            <span>硬约束、默认读者、七步流程与路由规则</span>
+          </div>
+          <div class="map-stem" aria-hidden="true"></div>
+          <div class="map-groups">
+            <article class="map-group">
+              <h3>先把方向定准</h3>
+              <span>输入与契约</span>
+              <div class="file-list">
+                <div class="file-pill"><code>ingest.md</code><span>按输入形态取材，并规定图片来源与内联方式</span></div>
+                <div class="file-pill"><code>contracts.md</code><span>固定五份契约、section 职责与标题边界</span></div>
+              </div>
+            </article>
+            <article class="map-group">
+              <h3>让材料决定叙事</h3>
+              <span>三条专项路线</span>
+              <div class="file-list">
+                <div class="file-pill"><code>paper.md</code><span>围绕问题、方法和少量证据精读单篇论文</span></div>
+                <div class="file-pill"><code>survey.md</code><span>先建 taxonomy，再按子问题递归展开关键工作</span></div>
+                <div class="file-pill"><code>project.md</code><span>从真实运行、模块角色和设计取舍理解项目</span></div>
+              </div>
+            </article>
+            <article class="map-group">
+              <h3>把产物做对</h3>
+              <span>表达与质量控制</span>
+              <div class="file-list">
+                <div class="file-pill"><code>visual-patterns.md</code><span>图形选择、配色、响应式与交互实现陷阱</span></div>
+                <div class="file-pill"><code>writing-style.md</code><span>中文解释密度、概念边界与不过度表达</span></div>
+                <div class="file-pill"><code>verify.md</code><span>静态、浏览器、内容与读者理解四层检查</span></div>
+                <div class="file-pill"><code>anti-patterns.md</code><span>40 条真实失败模式，写前与验收时各扫一遍</span></div>
+              </div>
+            </article>
+          </div>
+          <div class="readme-node"><strong>README.md</strong> 面向使用者解释安装、调用、流程与设计来历；它是入口说明，不参与运行时依赖。</div>
+          <p class="map-caption">职责关系：入口决定“必须遵守什么”，输入与专项文档决定“这次该怎么讲”，表达与验证文档决定“怎样把它可靠交付”。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="example">
+      <div class="shell">
+        <span class="eyebrow">05 · 贯穿例子</span>
+        <h2>这份页面本身，就是一次完整运行</h2>
+        <p class="section-intro">
+          本次任务没有虚构示例：输入就是本地 skill 目录，确认闸门就是上一轮对话，产物就是当前 HTML。这样读者看到的不只是规则描述，还能把每个抽象阶段对应到真实文件与状态。
+        </p>
+
+        <pre><code>输入目录  /Users/liangyan/my/skills/html-visual-reading
+用户目标  生成一份中文可视化解读
+确认状态  五份契约已由用户明确确认
+输出文件  /Users/liangyan/my/edc3000.github.io/public/reports/skills/html-visual-reading.html</code></pre>
+
+        <ol class="example-path" aria-label="本次任务路径">
+          <li><strong>摸清结构</strong><span>README → 目录 → SKILL 入口 → 九份 reference</span></li>
+          <li><strong>提炼主线</strong><span>它如何避免页面沦为漂亮但难读的卡片墙</span></li>
+          <li><strong>等待确认</strong><span>固定读者、术语、数据流、例子与核心问题</span></li>
+          <li><strong>实现页面</strong><span>连续正文 + 两张关系图 + 一组流程交互</span></li>
+          <li><strong>四层验证</strong><span>静态 → 浏览器 → 内容 → 目标读者理解</span></li>
+        </ol>
+
+        <div class="reading">
+          <p>
+            这个例子也暴露了一个重要边界：skill 的“程序状态”不在某个数据库里，而在<strong>对话确认、读取到的材料和生成中的 HTML</strong>里。下一次运行不会自动继承本次状态；除非用户提供当前对话结论，否则它会重新取材和定契约。
+          </p>
+        </div>
+
+        <details class="source-details">
+          <summary>查看页面判断与源文件的对应关系<span class="summary-note">这些细节用于追溯，不展开也不影响主线。</span></summary>
+          <div class="details-body source-table-wrap">
+            <table>
+              <thead>
+                <tr><th>页面判断</th><th>主要来源</th><th>证据角色</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>五份契约是写作前闸门</td><td><code>contracts.md</code></td><td>明确要求暂停并取得用户确认</td></tr>
+                <tr><td>section 由材料决定</td><td><code>SKILL.md</code>、<code>contracts.md</code></td><td>禁止固定模板与无职责章节</td></tr>
+                <tr><td>项目解读不能退化成目录树</td><td><code>project.md</code></td><td>要求用真实运行和设计取舍组织内容</td></tr>
+                <tr><td>浏览器验证不可省略</td><td><code>verify.md</code></td><td>规定三档宽度、展开态与错误捕获</td></tr>
+                <tr><td>现版本主动移除固定骨架</td><td><code>git 7615f01</code></td><td>重构删除 assets、scripts 与 tests，改为纯文档规则</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section id="tradeoffs">
+      <div class="shell">
+        <span class="eyebrow">06 · 设计取舍</span>
+        <h2>它用更强的过程纪律，换取更少的模板偏差</h2>
+        <p class="section-intro">
+          这套设计不是“免费得到更好页面”。它有意放弃固定骨架、第三方运行时和一次生成到底的速度，换来内容适配、离线可靠与较少的方向性返工。
+        </p>
+
+        <div class="tradeoffs">
+          <article class="tradeoff">
+            <h3>不保留固定 HTML 骨架</h3>
+            <p class="gain">section 与视觉结构能真正服从材料，不会把每份输入都压进同一模板。</p>
+            <p class="cost">一致性不再由代码保证，而要依赖契约、规则执行和验收纪律。</p>
+          </article>
+          <article class="tradeoff">
+            <h3>单文件、零运行时依赖</h3>
+            <p class="gain">页面可离线打开、容易分享，也不会因为 CDN 失效而老化。</p>
+            <p class="cost">Mermaid 等源码必须转译；复杂图和交互需要手工实现并验证。</p>
+          </article>
+          <article class="tradeoff">
+            <h3>契约后强制暂停</h3>
+            <p class="gain">在低成本阶段发现读者、术语或主线偏差，避免整页返工。</p>
+            <p class="cost">多一次人机往返，不适合只求极速草稿的场景。</p>
+          </article>
+          <article class="tradeoff">
+            <h3>运行时验证不可省略</h3>
+            <p class="gain">能发现 JS 静默失效、展开内容截断、外部请求与窄屏溢出。</p>
+            <p class="cost">需要可用浏览器环境；没有时必须降低验证等级并如实披露。</p>
+          </article>
+        </div>
+
+        <p class="evidence-note">
+          <strong>这一取舍有版本证据。</strong> 2026-08-13 的重构提交 <a href="https://github.com/edc3000/html-visual-reading/commit/7615f01">7615f01 ↗</a> 删除了固定 skeleton、组件资产、构建脚本与测试目录，新增工程项目专项和完整 reference。当前设计明确选择“规则驱动的现场生成”，而不是“模板驱动的机械拼装”。
+        </p>
+      </div>
+    </section>
+
+    <section id="boundary">
+      <div class="shell">
+        <span class="eyebrow">07 · 边界</span>
+        <h2>什么时候不值得动用这套完整流程</h2>
+        <p class="section-intro">
+          它最适合“材料复杂、理解成本高、产物需要独立分享”的任务。若核心需求不是教学阅读，强行使用五份契约与四层验证反而会增加不必要的过程成本。
+        </p>
+
+        <div class="decision-grid">
+          <article class="decision">
+            <h3>适合使用</h3>
+            <ul>
+              <li>论文、综述或工程项目需要被真正讲清楚</li>
+              <li>读者需要顺着主线建立心智模型</li>
+              <li>产物要离线保存、独立分享或长期归档</li>
+              <li>愿意为契约确认和浏览器验收多花一轮时间</li>
+            </ul>
+          </article>
+          <article class="decision no">
+            <h3>换一种产物更合适</h3>
+            <ul>
+              <li>只需要一页速记、会议摘要或原文摘录</li>
+              <li>需要实时数据、后台接口或复杂应用状态</li>
+              <li>页面必须进入既有设计系统和组件构建链</li>
+              <li>无法取得材料、也无法验证关键事实与运行状态</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="shell footer-inner">
+      <p>
+        本页依据本地 <code>html-visual-reading</code> skill 的 README、入口说明、九份 reference 与 Git 历史生成。源项目由 edc3000 维护，并以 syt-nju 的 <code>blog-to-html</code> 为基底重写。
+      </p>
+      <a href="https://github.com/edc3000/html-visual-reading">阅读源仓库 ↗</a>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      const tabs = [...document.querySelectorAll('[data-toggle="stage"]')];
+      const panels = [...document.querySelectorAll('.stage-panel')];
+
+      function activateStage(stage) {
+        tabs.forEach((tab) => {
+          const active = tab.dataset.stage === stage;
+          tab.setAttribute('aria-selected', String(active));
+          tab.tabIndex = active ? 0 : -1;
+        });
+
+        panels.forEach((panel) => {
+          panel.hidden = panel.id !== `panel-${stage}`;
+        });
+      }
+
+      tabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => activateStage(tab.dataset.stage));
+        tab.addEventListener('keydown', (event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          let next = index;
+          if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+          if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+          if (event.key === 'Home') next = 0;
+          if (event.key === 'End') next = tabs.length - 1;
+          tabs[next].focus();
+          activateStage(tabs[next].dataset.stage);
+        });
+      });
+
+      activateStage('1');
+    })();
+  </script>
+</body>
+</html>
