@@ -19,9 +19,10 @@ export function injectBackLink(html: string, section: Section | undefined): stri
   if (html.includes(BACK_LINK_MARK)) return html;
 
   const href = section ? `/${section}/` : '/';
-  const label = section ? `Leo · ${SECTION_LABEL[section]}` : '返回 Leo';
-  // 窄屏下只剩箭头,无障碍名称要独立成立
-  const aria = section ? `返回${SECTION_LABEL[section]}` : '返回 Leo';
+  const name = section ? SECTION_LABEL[section] : 'Leo';
+  const label = section ? `Leo · ${name}` : '返回 Leo';
+  // 窄屏下只剩箭头,无障碍名称要独立成立;板块名以拉丁字母开头时补一个空格
+  const aria = `返回${/^[A-Za-z0-9]/.test(name) ? ' ' : ''}${name}`;
   const snippet = `${BACK_LINK_MARK}
 <style>
 a.site-back-link{position:fixed; right:20px; bottom:20px; z-index:9999;

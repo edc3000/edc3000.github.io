@@ -48,6 +48,10 @@ describe('injectBackLink', () => {
     expect(out).toContain('<span class="site-back-label">Leo · 竞赛实录</span>');
   });
 
+  it('板块名以拉丁字母开头时,无障碍名称补空格', () => {
+    expect(injectBackLink(page, 'skills')).toContain('aria-label="返回 Agent 技能包"');
+  });
+
   it('重复注入不会叠加第二份', () => {
     const once = injectBackLink(page, 'papers');
     const twice = injectBackLink(once, 'papers');
