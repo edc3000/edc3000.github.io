@@ -1,5 +1,5 @@
 ---
-title: "DAPD:当 teacher 看得见答案,学生学会了假装记得"
+title: "DAPD:用 Self 分布消除 OPSD 里的信息不对称"
 date: 2026-08-17
 description: "On-policy 自蒸馏让模型对着参考答案给自己当 teacher,学生推理时却看不到,于是学会凭空断言答案。这篇论文把病因指向信息不对称,并补了一个既可训练、又和 teacher 信息对等的中间分布当桥。Qwen3-4B 六项基准平均 +2.00,且规模越大优势越明显。"
 tags: ["llm", "post-training", "distillation", "论文精读"]
