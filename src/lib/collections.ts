@@ -1,6 +1,7 @@
 import { getCollection } from 'astro:content';
+import { SECTIONS, SECTION_LABEL, SECTION_BLURB, type Section } from './sections';
 
-export type Section = 'competitions' | 'papers' | 'algorithms' | 'skills';
+export { SECTION_LABEL, SECTION_BLURB, type Section };
 
 export interface UnifiedPost {
   id: string;
@@ -11,22 +12,6 @@ export interface UnifiedPost {
   tags: string[];
   section: Section;
 }
-
-const SECTIONS: Section[] = ['competitions', 'papers', 'algorithms', 'skills'];
-
-export const SECTION_LABEL: Record<Section, string> = {
-  competitions: '竞赛实录',
-  papers: '论文精读',
-  algorithms: '算法实践',
-  skills: 'Agent 技能包',
-};
-
-export const SECTION_BLURB: Record<Section, string> = {
-  competitions: 'Kaggle 完整复盘,含没能奏效的尝试',
-  papers: 'LLM、强化学习与多模态方向的精读笔记',
-  algorithms: '实现细节、性能取舍与踩坑记录',
-  skills: 'Claude Code / AI Agent 技能包',
-};
 
 function richReportOf(data: unknown): string | undefined {
   return typeof data === 'object' && data !== null && 'richReport' in data
