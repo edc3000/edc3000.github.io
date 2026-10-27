@@ -52,7 +52,7 @@ export async function getAllPosts(): Promise<UnifiedPost[]> {
 
 export async function countBySection(): Promise<Record<Section, number>> {
   const posts = await getAllPosts();
-  const counts = { competitions: 0, papers: 0, algorithms: 0, skills: 0 };
+  const counts = { competitions: 0, papers: 0, algorithms: 0, skills: 0, interview: 0 };
   for (const p of posts) counts[p.section] += 1;
   return counts;
 }

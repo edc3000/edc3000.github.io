@@ -1,0 +1,25 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PostCard from '../../components/PostCard.astro';
+import EmptySection from '../../components/EmptySection.astro';
+import { getCollection } from 'astro:content';
+
+const entries = (await getCollection('interview', ({ data }) => !data.draft))
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+---
+<BaseLayout title="LLMs八股 · Leo" description="大模型面试八股:架构、训练与推理的图解笔记。">
+  <h1>LLMs八股</h1>
+  {entries.length === 0 ? (
+    <EmptySection heading="LLMs八股" note="这个板块还没有内容,有积累后会陆续加进来。" />
+  ) : (
+    entries.map((entry) => (
+      <PostCard
+        href={entry.data.richReport ?? `/interview/${entry.id}/`}
+        title={entry.data.title}
+        description={entry.data.description}
+        date={entry.data.date}
+        tags={entry.data.tags}
+      />
+    ))
+  )}
+</BaseLayout>

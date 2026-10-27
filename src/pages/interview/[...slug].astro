@@ -1,0 +1,17 @@
+---
+import PostLayout from '../../layouts/PostLayout.astro';
+import { getCollection, render } from 'astro:content';
+import { needsDetailPage } from '../../lib/collections';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('interview', ({ data }) => !data.draft);
+  return entries.filter(needsDetailPage).map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+const d = entry.data;
+---
+<PostLayout title={d.title} description={d.description} date={d.date} tags={d.tags}>
+  <Content />
+</PostLayout>

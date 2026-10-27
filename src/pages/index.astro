@@ -8,9 +8,9 @@ const posts = await getAllPosts();
 const counts = await countBySection();
 const latest = posts.slice(0, 5);
 
-const sections = (['competitions', 'papers', 'algorithms', 'skills'] as const);
+const sections = (['competitions', 'papers', 'algorithms', 'skills', 'interview'] as const);
 ---
-<BaseLayout title="Leo" description="Kaggle 竞赛复盘、论文精读、算法实践与 AI Agent 技能包">
+<BaseLayout title="Leo" description="Kaggle 竞赛复盘、论文精读、算法实践、AI Agent 技能包与 LLMs八股">
   <section class="hero">
     <h1>Leo</h1>
     <p>筑基期·算法工程师</p>

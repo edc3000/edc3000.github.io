@@ -8,7 +8,7 @@ const base = {
   description: z.string(),
   tags: z.array(z.string()).default([]),
   draft: z.boolean().default(false),
-  // 精排版 HTML 的 public 路径。四个板块通用:填了它,列表/首页/标签/RSS
+  // 精排版 HTML 的 public 路径。各板块通用:填了它,列表/首页/标签/RSS
   // 的链接就直接指向该 HTML。未声明在此处的板块会被 Zod 静默 strip 掉该字段。
   richReport: z.string().optional(),
 };
@@ -64,4 +64,9 @@ const skills = defineCollection({
   }),
 });
 
-export const collections = { competitions, papers, algorithms, skills };
+const interview = defineCollection({
+  loader: glob({ pattern: '**/*.md', base: './src/content/interview' }),
+  schema: z.object(base),
+});
+
+export const collections = { competitions, papers, algorithms, skills, interview };

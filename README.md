@@ -25,6 +25,7 @@ git push
 | 论文精读 | `src/content/papers/` |
 | 算法实践 | `src/content/algorithms/` |
 | Agent 技能包 | `src/content/skills/` |
+| LLMs八股 | `src/content/interview/` |
 
 新增后自动出现在:板块列表页、首页「最新」、RSS、标签页、全文搜索。
 
@@ -32,8 +33,8 @@ git push
 
 ### 各板块 frontmatter
 
-四个板块共有 `title` / `date` / `description` / `tags` / `draft` / `richReport`,
-下面各例只列出该板块特有的字段。`richReport` 四个板块通用,填了就跳精排版 HTML,
+各板块共有 `title` / `date` / `description` / `tags` / `draft` / `richReport`,
+下面各例只列出该板块特有的字段。`richReport` 各板块通用,填了就跳精排版 HTML,
 下方示例中只在竞赛里写出。
 
 竞赛(`privateLB` / `rankNote` / `richReport` 可选):
@@ -104,6 +105,8 @@ originalAuthor: "原作者名"
 ---
 ```
 
+LLMs八股没有特有字段,只用共有的 `title` / `date` / `description` / `tags` / `richReport`。
+
 ## 下线或删除文章
 
 - **临时下线**:frontmatter 加 `draft: true` 后推送。文件保留,站点不再显示,可随时恢复。
@@ -122,6 +125,7 @@ public/reports/competitions/    竞赛方案
 public/reports/papers/          论文精读
 public/reports/algorithms/      算法实践
 public/reports/skills/          技能包
+public/reports/interview/       LLMs八股
 ```
 
 目录用时再建,不预先占位——`public/` 下的一切都会原样发布,空目录里的占位文件

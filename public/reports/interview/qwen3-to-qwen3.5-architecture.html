@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="按文本/多模态与 Dense/MoE 两条轴梳理 Qwen3、Qwen3-VL、Qwen3-Next、Qwen3.5 的架构演进。">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>Qwen3→3.5 架构演进</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@600;900&display=swap">
+<style>
+/* Layout: 技术规格书式单栏长文，图示在全宽卡片里；每个模块类型一个固定颜色，贯穿所有图 */
+:root{
+  --bg:#EFF2F4; --surface:#FFFFFF; --surface-2:#F7F9FA;
+  --ink:#16212B; --muted:#5B6873; --line:#D3DAE0; --line-strong:#9AA6B0;
+  --attn:#2F5FD0; --attn-bg:#E3EBFB;
+  --lin:#0C8578; --lin-bg:#DBF1ED;
+  --moe:#B0731A; --moe-bg:#F7EBD6;
+  --vis:#A43C6A; --vis-bg:#F6E2EB;
+  --norm-bg:#EAEEF1;
+  --new:#D0442C; --new-bg:#FCE9E5;
+  --display:"Noto Serif SC","Songti SC",serif;
+  --sans:-apple-system,"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --attn:#86A7F4; --attn-bg:#1C2A47;
+  --lin:#4CC6B6; --lin-bg:#11332F;
+  --moe:#E2A851; --moe-bg:#382A13;
+  --vis:#E482AE; --vis-bg:#3A1C2A;
+  --norm-bg:#212C37;
+  --new:#FF7C61; --new-bg:#3B1E18;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --attn:#86A7F4; --attn-bg:#1C2A47;
+  --lin:#4CC6B6; --lin-bg:#11332F;
+  --moe:#E2A851; --moe-bg:#382A13;
+  --vis:#E482AE; --vis-bg:#3A1C2A;
+  --norm-bg:#212C37;
+  --new:#FF7C61; --new-bg:#3B1E18;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.75}
+.wrap{max-width:1040px;margin:0 auto;padding-block:40px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:56px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.3}
+h1{font-size:clamp(28px,5vw,44px);font-weight:900;letter-spacing:.01em}
+h2{font-size:clamp(22px,3.2vw,28px);font-weight:900}
+h3{font-size:19px;font-weight:600}
+p{margin:0;max-width:68ch}
+code,.mono{font-family:var(--mono);font-size:.9em}
+a{color:var(--attn)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--attn);outline-offset:3px;border-radius:4px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.stack{display:flex;flex-direction:column;gap:16px}
+.sub{display:flex;flex-direction:column;gap:14px;padding-top:12px}
+.sub-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.sec-head{display:flex;flex-direction:column;gap:6px;border-top:2px solid var(--ink);padding-top:14px}
+.sec-head .meta{display:flex;flex-wrap:wrap;gap:8px 16px;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+
+/* hero */
+header{display:flex;flex-direction:column;gap:18px}
+.lede{font-size:17px;color:var(--muted);max-width:60ch}
+.timeline{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid var(--line);background:var(--surface);border-radius:10px;overflow:hidden}
+.tl{padding:14px 14px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;min-width:0}
+.tl:last-child{border-right:0}
+.tl .d{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.tl .n{font-weight:700;font-size:16px}
+.tl .x{font-size:13px;color:var(--muted);line-height:1.55}
+.tl.key{background:var(--surface-2)}
+.tl.key .n{color:var(--new)}
+.toc{display:flex;flex-wrap:wrap;gap:8px}
+.toc a{font-size:13.5px;text-decoration:none;color:var(--ink);border:1px solid var(--line);background:var(--surface);padding:4px 12px;border-radius:999px}
+.toc a:hover{border-color:var(--ink)}
+
+/* recite card */
+.recite{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--ink);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.recite p{max-width:none}
+.recite .tag{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.08em}
+mark{background:var(--new-bg);color:inherit;padding:0 3px;border-radius:3px}
+
+/* matrix */
+.matrix td{font-size:13.5px}
+.matrix td.none{color:var(--muted)}
+.pill{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:4px;margin:2px 4px 2px 0;border:1px solid var(--line-strong);background:var(--surface)}
+.pill.d{border-color:var(--attn);background:var(--attn-bg)}
+.pill.m{border-color:var(--moe);background:var(--moe-bg)}
+.axes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+
+/* diagrams */
+figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.scroll{overflow-x:auto}
+.dg{display:block;width:100%;min-width:760px;height:auto}
+figcaption{font-size:13.5px;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:2px;display:inline-block;border:1px solid}
+.sw.attn{background:var(--attn-bg);border-color:var(--attn)}
+.sw.lin{background:var(--lin-bg);border-color:var(--lin)}
+.sw.moe{background:var(--moe-bg);border-color:var(--moe)}
+.sw.vis{background:var(--vis-bg);border-color:var(--vis)}
+.sw.new{background:var(--new-bg);border-color:var(--new);border-style:dashed}
+
+.dg text{fill:var(--ink);font-family:var(--sans);font-size:12.5px}
+.dg .c{text-anchor:middle;dominant-baseline:central}
+.dg .s{font-size:11.5px;fill:var(--muted)}
+.dg .h{font-weight:700;font-size:13.5px}
+.dg .m{font-family:var(--mono);font-size:11.5px}
+.dg rect{stroke-width:1.2}
+.b-io{fill:var(--surface);stroke:var(--ink)}
+.b-norm{fill:var(--norm-bg);stroke:var(--line-strong)}
+.b-attn{fill:var(--attn-bg);stroke:var(--attn)}
+.b-lin{fill:var(--lin-bg);stroke:var(--lin)}
+.b-moe{fill:var(--moe-bg);stroke:var(--moe)}
+.b-vis{fill:var(--vis-bg);stroke:var(--vis)}
+.b-new{fill:var(--new-bg);stroke:var(--new);stroke-dasharray:4 3}
+.panel{fill:var(--surface-2);stroke:var(--line)}
+.frame{fill:none;stroke:var(--line-strong);stroke-dasharray:5 4}
+.ln{stroke:var(--muted);stroke-width:1.3;fill:none}
+.ln.dash{stroke:var(--vis);stroke-dasharray:4 3}
+.arr{marker-end:url(#ah)}
+.ahp{fill:var(--muted)}
+.cell-off{fill:var(--norm-bg);stroke:var(--line);stroke-width:.6}
+.cell-on{fill:var(--moe);stroke:var(--moe)}
+.c-lin{fill:var(--lin)}
+.c-attn{fill:var(--attn)}
+.tagc{fill:var(--ink)}
+.dg .tagt{fill:var(--surface);font-weight:700;font-size:11px}
+.sum{fill:var(--surface);stroke:var(--muted);stroke-width:1.3}
+.dg .newt{fill:var(--new);font-family:var(--mono);font-size:10.5px;font-weight:600}
+
+/* points */
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.pt{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pt h3,.pt h4{font-family:var(--sans);font-size:15.5px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0}
+.pt p{font-size:14.5px;line-height:1.7}
+.chip{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;border:1px solid;letter-spacing:.03em}
+.chip.new{color:var(--new);border-color:var(--new);background:var(--new-bg)}
+.chip.keep{color:var(--muted);border-color:var(--line-strong)}
+.chip.dense{color:var(--attn);border-color:var(--attn);background:var(--attn-bg)}
+.chip.moe{color:var(--moe);border-color:var(--moe);background:var(--moe-bg)}
+.chip.vis{color:var(--vis);border-color:var(--vis);background:var(--vis-bg)}
+.formula{font-family:var(--mono);font-size:13px;background:var(--norm-bg);padding:8px 10px;border-radius:6px;overflow-x:auto;white-space:nowrap}
+.note{font-size:14px;color:var(--muted);border:1px dashed var(--line-strong);border-radius:8px;padding:12px 14px}
+
+/* tables */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:820px;font-size:13.5px;line-height:1.55}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+thead th{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--muted);background:var(--surface-2)}
+tbody th{font-weight:700;white-space:nowrap;width:96px}
+tr:last-child th,tr:last-child td{border-bottom:0}
+td.chg{background:var(--new-bg)}
+.spec table{font-family:var(--mono);font-size:12.5px;min-width:640px;font-variant-numeric:tabular-nums}
+.spec td:first-child{font-weight:600}
+
+/* kv bars */
+.kv{display:flex;flex-direction:column;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px}
+.kvrow{display:grid;grid-template-columns:170px minmax(0,1fr) 240px;gap:12px;align-items:center}
+.kvrow .nm{font-weight:600;font-size:14px}
+.kvrow .nm small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.bar{height:20px;background:var(--norm-bg);border-radius:3px;position:relative}
+.bar i{position:absolute;inset:0 auto 0 0;border-radius:3px}
+.bar i.full{background:var(--attn)}
+.bar i.hyb{background:var(--lin)}
+.kvrow .v{font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--muted)}
+.kvrow .v b{color:var(--ink);font-weight:600}
+
+/* qa */
+.qa{display:flex;flex-direction:column;gap:10px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 18px}
+summary{cursor:pointer;padding:14px 0;font-weight:700;font-size:15px;list-style:none;display:flex;gap:10px}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"+";font-family:var(--mono);color:var(--muted);width:14px;flex:none}
+details[open] summary::before{content:"−"}
+details .ans{padding:0 0 16px 24px;display:flex;flex-direction:column;gap:8px;font-size:14.5px}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;font-size:13px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);padding:5px 12px;border-radius:6px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button:focus-visible{outline:2px solid var(--attn);outline-offset:2px}
+
+ol.tpl{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:8px;max-width:72ch}
+ol.tpl b{font-weight:700}
+.src{font-size:13px;color:var(--muted)}
+.src ul{margin:6px 0 0;padding-left:1.2em}
+
+@media (max-width:760px){
+  .timeline{grid-template-columns:1fr}
+  .tl{border-right:0;border-bottom:1px solid var(--line)}
+  .tl:last-child{border-bottom:0}
+  .grid2,.axes{grid-template-columns:1fr}
+  .kvrow{grid-template-columns:1fr;gap:6px}
+}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body data-pagefind-body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">大模型面试八股 · 架构篇</div>
+  <h1>Qwen3 → Qwen3.5 架构演进</h1>
+  <p class="lede">按两条轴看每一代：文本还是多模态，Dense 还是 MoE。每类模型都有架构图、改动原因和面试追问。</p>
+  <div class="timeline">
+    <div class="tl"><span class="d">2025.04</span><span class="n">Qwen3</span><span class="x">纯文本。Dense 6 个尺寸 + MoE 2 个尺寸</span></div>
+    <div class="tl"><span class="d">2025.07</span><span class="n">Qwen3-2507</span><span class="x">架构不变。Instruct / Thinking 拆开，上下文 256K</span></div>
+    <div class="tl key"><span class="d">2025.09</span><span class="n">Qwen3-Next</span><span class="x">纯文本，只有 MoE。混合注意力、超稀疏 MoE、MTP</span></div>
+    <div class="tl"><span class="d">2025.09–10</span><span class="n">Qwen3-VL</span><span class="x">多模态。Dense 4 个 + MoE 2 个，ViT 接在 Qwen3 上</span></div>
+    <div class="tl"><span class="d">2026.02–03</span><span class="n">Qwen3.5</span><span class="x">全系原生多模态。Dense 5 个 + MoE 3 个，都用混合注意力</span></div>
+  </div>
+  <nav class="toc" aria-label="目录">
+    <a href="#recite">背诵版</a><a href="#axes">两条轴</a><a href="#qwen3">Qwen3 文本</a><a href="#vl">Qwen3-VL</a><a href="#next">Qwen3-Next</a><a href="#q35">Qwen3.5</a><a href="#compare">对比总表</a><a href="#kv">KV cache 估算</a><a href="#qa">高频追问</a><a href="#tpl">答题模板</a>
+  </nav>
+</header>
+
+<section id="recite" class="stack">
+  <div class="sec-head"><span class="eyebrow">先给结论</span><h2>30 秒背诵版</h2></div>
+  <div class="recite">
+    <span class="tag">两条轴：文本 / 多模态 × Dense / MoE；一条主线：降推理成本</span>
+    <p><b>Qwen3</b> 的文本模型分 <mark>Dense（0.6B–32B）和 MoE（30B-A3B、235B-A22B）</mark>两条线。两者共用 GQA + QK-Norm、SwiGLU、RoPE、Pre-RMSNorm，<mark>区别只在 FFN 那一格</mark>：MoE 是 128 个专家选 8 个，不设共享专家。多模态单独发布了 <b>Qwen3-VL</b>，把 ViT 和 Merger 接到 Qwen3 的 Dense 或 MoE 模型上，新增了 Interleaved-MRoPE 和 DeepStack。</p>
+    <p><b>Qwen3-Next</b> 是转折点，只有 MoE、只有文本。注意力改为 <mark>Gated DeltaNet 和 Gated Attention 按 3:1 混合</mark>，MoE 扩到 512 选 10 加 1 个共享专家，并加入 MTP。</p>
+    <p><b>Qwen3.5</b> 把这套混合注意力<mark>同时用到 Dense 和 MoE 两条线</mark>，而且<mark>全系原生多模态</mark>，不再单独出 VL 版本。词表扩到 248K。</p>
+  </div>
+</section>
+
+<section id="axes" class="stack">
+  <div class="sec-head"><span class="eyebrow">先分清楚</span><h2>两条轴：每个模型属于哪一格</h2></div>
+  <div class="axes">
+    <div class="pt"><h3>Dense 还是 MoE <span class="chip keep">看 FFN</span></h3><p>注意力、Norm、残差、Embedding 都一样，只有 FFN 那一格不同。Dense 让每个 token 都走同一个 SwiGLU FFN。MoE 有一个 Router，每个 token 只走少数几个专家。MoE 的总参数大，但每个 token 的计算量只取决于激活参数。</p></div>
+    <div class="pt"><h3>文本还是多模态 <span class="chip keep">看输入端</span></h3><p>多模态模型在输入端多了视觉编码器（ViT）和 Merger，把图像 patch 变成 token 后和文本 token 放进同一个序列，位置编码也要能表示时间、高、宽。Qwen3 时代是在文本模型上再接视觉（Qwen3-VL），Qwen3.5 是从预训练开始就混合训练。</p></div>
+  </div>
+  <div class="tbl matrix"><table>
+    <thead><tr><th>代际</th><th>文本 · Dense</th><th>文本 · MoE</th><th>多模态 · Dense</th><th>多模态 · MoE</th></tr></thead>
+    <tbody>
+      <tr><th>Qwen3</th><td><span class="pill d">0.6B</span><span class="pill d">1.7B</span><span class="pill d">4B</span><span class="pill d">8B</span><span class="pill d">14B</span><span class="pill d">32B</span></td><td><span class="pill m">30B-A3B</span><span class="pill m">235B-A22B</span></td><td>Qwen3-VL：<span class="pill d">2B</span><span class="pill d">4B</span><span class="pill d">8B</span><span class="pill d">32B</span></td><td>Qwen3-VL：<span class="pill m">30B-A3B</span><span class="pill m">235B-A22B</span><br>Qwen3-Omni：<span class="pill m">30B-A3B</span></td></tr>
+      <tr><th>Qwen3-Next</th><td class="none">无</td><td><span class="pill m">80B-A3B</span></td><td class="none">无</td><td class="none">无</td></tr>
+      <tr><th>Qwen3.5</th><td class="none">无，全系都是多模态</td><td class="none">无，全系都是多模态</td><td><span class="pill d">0.8B</span><span class="pill d">2B</span><span class="pill d">4B</span><span class="pill d">9B</span><span class="pill d">27B</span></td><td><span class="pill m">35B-A3B</span><span class="pill m">122B-A10B</span><span class="pill m">397B-A17B</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">规律：小尺寸用 Dense，部署简单、好微调，也能上端侧；大尺寸用 MoE，用较少的激活参数换更大的总容量。Qwen3 和 Qwen3.5 都是这样分的，Qwen3-Next 只是验证新架构的实验版，所以只出了一个 MoE。</p>
+</section>
+
+<!-- ============ Qwen3 text ============ -->
+<section id="qwen3" class="stack">
+  <div class="sec-head">
+    <span class="eyebrow">第一代 · 文本基线</span>
+    <h2>Qwen3 文本模型：Dense 和 MoE</h2>
+    <div class="meta"><span>2025.04</span><span>纯文本</span><span>Dense 0.6B–32B · MoE 30B-A3B / 235B-A22B</span><span>36T tokens · 119 种语言</span></div>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 960 640" role="img" aria-label="Qwen3 解码器块结构图：主干为 RMSNorm、GQA 注意力、残差、RMSNorm、FFN、残差。右侧分别展开注意力细节、Dense 的 SwiGLU FFN 和 MoE 的 128 选 8">
+      <!-- Column: decoder stack -->
+      <rect x="70" y="16" width="180" height="32" rx="6" class="b-io"/><text x="160" y="32" class="c">输入 token</text>
+      <line x1="160" y1="48" x2="160" y2="68" class="ln arr"/>
+      <rect x="50" y="68" width="220" height="34" rx="6" class="b-norm"/><text x="160" y="85" class="c">Embedding · 词表 151,669</text>
+      <rect x="24" y="118" width="272" height="338" rx="10" class="frame"/>
+      <text x="38" y="438" class="s">Decoder Block</text>
+      <text x="282" y="438" class="s m" text-anchor="end">× L 层</text>
+      <line x1="160" y1="102" x2="160" y2="150" class="ln arr"/>
+      <rect x="95" y="150" width="130" height="28" rx="6" class="b-norm"/><text x="160" y="164" class="c">RMSNorm</text>
+      <line x1="160" y1="178" x2="160" y2="196" class="ln arr"/>
+      <rect x="60" y="196" width="200" height="46" rx="6" class="b-attn"/>
+      <text x="160" y="212" class="c h">GQA 自注意力</text><text x="160" y="230" class="c s">QK-Norm · RoPE</text>
+      <circle cx="258" cy="198" r="10" class="tagc"/><text x="258" y="198" class="c tagt">A</text>
+      <line x1="160" y1="242" x2="160" y2="258" class="ln arr"/>
+      <circle cx="160" cy="270" r="12" class="sum"/><text x="160" y="270" class="c">+</text>
+      <path d="M160 136 H44 V270 H148" class="ln arr"/>
+      <line x1="160" y1="282" x2="160" y2="300" class="ln arr"/>
+      <rect x="95" y="300" width="130" height="28" rx="6" class="b-norm"/><text x="160" y="314" class="c">RMSNorm</text>
+      <line x1="160" y1="328" x2="160" y2="346" class="ln arr"/>
+      <rect x="60" y="346" width="200" height="46" rx="6" class="b-moe"/>
+      <text x="160" y="362" class="c h">FFN：Dense 或 MoE</text><text x="160" y="380" class="c s">两条产品线只差这一格</text>
+      <circle cx="258" cy="348" r="10" class="tagc"/><text x="258" y="348" class="c tagt">B</text>
+      <line x1="160" y1="392" x2="160" y2="408" class="ln arr"/>
+      <circle cx="160" cy="420" r="12" class="sum"/><text x="160" y="420" class="c">+</text>
+      <path d="M160 290 H44 V420 H148" class="ln arr"/>
+      <line x1="160" y1="432" x2="160" y2="470" class="ln arr"/>
+      <rect x="95" y="470" width="130" height="28" rx="6" class="b-norm"/><text x="160" y="484" class="c">RMSNorm</text>
+      <line x1="160" y1="498" x2="160" y2="516" class="ln arr"/>
+      <rect x="70" y="516" width="180" height="32" rx="6" class="b-io"/><text x="160" y="532" class="c">LM Head → 下一个 token</text>
+      <text x="160" y="572" class="c s">0.6B / 1.7B / 4B 的 Embedding 与 LM Head 共享权重</text>
+
+      <!-- Panel A: attention -->
+      <rect x="330" y="16" width="290" height="430" rx="10" class="panel"/>
+      <text x="346" y="40" class="h">A · 注意力：GQA + QK-Norm</text>
+      <rect x="430" y="56" width="90" height="26" rx="6" class="b-norm"/><text x="475" y="69" class="c m">x</text>
+      <line x1="475" y1="82" x2="385" y2="104" class="ln arr"/>
+      <line x1="475" y1="82" x2="475" y2="104" class="ln arr"/>
+      <line x1="475" y1="82" x2="565" y2="104" class="ln arr"/>
+      <rect x="350" y="104" width="70" height="28" rx="6" class="b-attn"/><text x="385" y="118" class="c m">W_q</text>
+      <rect x="440" y="104" width="70" height="28" rx="6" class="b-attn"/><text x="475" y="118" class="c m">W_k</text>
+      <rect x="530" y="104" width="70" height="28" rx="6" class="b-attn"/><text x="565" y="118" class="c m">W_v</text>
+      <line x1="385" y1="132" x2="385" y2="154" class="ln arr"/>
+      <line x1="475" y1="132" x2="475" y2="154" class="ln arr"/>
+      <rect x="350" y="154" width="160" height="28" rx="6" class="b-new"/><text x="430" y="168" class="c">逐头 QK-Norm</text>
+      <text x="516" y="172" class="newt">NEW</text>
+      <line x1="385" y1="182" x2="385" y2="204" class="ln arr"/>
+      <line x1="475" y1="182" x2="475" y2="204" class="ln arr"/>
+      <rect x="350" y="204" width="160" height="28" rx="6" class="b-norm"/><text x="430" y="218" class="c">RoPE</text>
+      <line x1="385" y1="232" x2="385" y2="262" class="ln arr"/>
+      <line x1="475" y1="232" x2="475" y2="262" class="ln arr"/>
+      <line x1="565" y1="132" x2="565" y2="262" class="ln arr"/>
+      <rect x="350" y="262" width="250" height="44" rx="6" class="b-attn"/>
+      <text x="475" y="277" class="c m">softmax(QKᵀ/√d)·V</text><text x="475" y="295" class="c s">GQA：多个 Q 头共享一组 KV</text>
+      <line x1="475" y1="306" x2="475" y2="328" class="ln arr"/>
+      <rect x="430" y="328" width="90" height="28" rx="6" class="b-attn"/><text x="475" y="342" class="c m">W_o</text>
+      <text x="346" y="388" class="s">Dense：KV 8 头；MoE：KV 4 头；head_dim 128</text>
+      <text x="346" y="408" class="s">Qwen2 → 3：QKV bias 换成 QK-Norm</text>
+      <text x="346" y="428" class="s">目的：防止 attention logits 过大</text>
+
+      <!-- Callout under A -->
+      <rect x="330" y="466" width="290" height="160" rx="10" class="panel"/>
+      <text x="346" y="490" class="h">Dense 和 MoE 只差 B 这一格</text>
+      <text x="346" y="516" class="s">注意力、Norm、残差、Embedding 完全相同</text>
+      <text x="346" y="538" class="s">Dense：每个 token 都走同一个 FFN</text>
+      <text x="346" y="560" class="s">MoE：每个 token 只走 8 个专家</text>
+      <text x="346" y="582" class="s">235B-A22B 每 token 计算量约等于 22B Dense，</text>
+      <text x="346" y="602" class="s">但显存要装下全部 235B 参数</text>
+
+      <!-- Panel B1: Dense FFN -->
+      <rect x="650" y="16" width="290" height="220" rx="10" class="panel"/>
+      <text x="666" y="40" class="h">B1 · Dense：SwiGLU FFN</text>
+      <rect x="750" y="52" width="90" height="24" rx="6" class="b-norm"/><text x="795" y="64" class="c m">h</text>
+      <line x1="795" y1="76" x2="722" y2="92" class="ln arr"/>
+      <line x1="795" y1="76" x2="868" y2="92" class="ln arr"/>
+      <rect x="672" y="92" width="100" height="28" rx="6" class="b-attn"/><text x="722" y="106" class="c m">W_gate</text>
+      <rect x="818" y="92" width="100" height="28" rx="6" class="b-attn"/><text x="868" y="106" class="c m">W_up</text>
+      <line x1="722" y1="120" x2="722" y2="132" class="ln arr"/>
+      <rect x="672" y="132" width="100" height="24" rx="6" class="b-norm"/><text x="722" y="144" class="c m">SiLU</text>
+      <line x1="722" y1="156" x2="786" y2="176" class="ln arr"/>
+      <path d="M868 120 V180 H806" class="ln arr"/>
+      <circle cx="795" cy="180" r="10" class="sum"/><text x="795" y="180" class="c">⊙</text>
+      <line x1="795" y1="190" x2="795" y2="200" class="ln arr"/>
+      <rect x="750" y="200" width="90" height="26" rx="6" class="b-attn"/><text x="795" y="213" class="c m">W_down</text>
+
+      <!-- Panel B2: MoE -->
+      <rect x="650" y="252" width="290" height="374" rx="10" class="panel"/>
+      <text x="666" y="276" class="h">B2 · MoE：128 选 8，无共享专家</text>
+      <rect x="750" y="290" width="90" height="24" rx="6" class="b-norm"/><text x="795" y="302" class="c m">h</text>
+      <line x1="795" y1="314" x2="795" y2="330" class="ln arr"/>
+      <rect x="700" y="330" width="190" height="28" rx="6" class="b-moe"/><text x="795" y="344" class="c">Router · softmax → Top-8</text>
+      <line x1="795" y1="358" x2="795" y2="374" class="ln arr"/>
+      <g id="grid-q3"></g>
+      <text x="795" y="512" class="c s">128 个路由专家，每个专家都是一个小 SwiGLU</text>
+      <line x1="795" y1="522" x2="795" y2="536" class="ln arr"/>
+      <rect x="700" y="536" width="190" height="28" rx="6" class="b-moe"/><text x="795" y="550" class="c m">Σ gᵢ · Expertᵢ(h)</text>
+      <text x="666" y="590" class="s">去掉 Qwen2-MoE 的共享专家，global-batch 均衡</text>
+      <text x="666" y="610" class="s">激活比例：235B-A22B ≈ 9.4%，30B-A3B ≈ 10%</text>
+    </svg>
+    </div>
+    <div class="legend"><span><i class="sw attn"></i>注意力 / 线性投影</span><span><i class="sw moe"></i>FFN / MoE</span><span><i class="sw new"></i>相对上一代新增</span></div>
+  </figure>
+
+  <div class="sub">
+    <div class="sub-head"><h3>Dense 版：0.6B–32B</h3><span class="chip dense">Dense</span><span class="chip keep">文本</span></div>
+    <div class="grid2">
+      <div class="pt"><h4>标准 Decoder 结构</h4><p>GQA（KV 8 头）+ QK-Norm + RoPE，FFN 用 SwiGLU，Pre-RMSNorm。相比 Qwen2，主要变化是去掉 QKV bias，加入 QK-Norm。</p>
+        <div class="formula">FFN(h) = W_down( SiLU(W_gate·h) ⊙ W_up·h )</div></div>
+      <div class="pt"><h4>小模型共享 Embedding</h4><p>0.6B、1.7B、4B 让输入 Embedding 和 LM Head 共享权重。词表有 151K，小模型里 Embedding 占的参数比例很高，共享可以省下不少参数。</p></div>
+      <div class="pt"><h4>后训练怎么来</h4><p>32B 和 235B-A22B 是旗舰，走完整的四阶段：长 CoT 冷启动、推理 RL、思考模式融合、通用 RL。其余尺寸（包括 30B-A3B）用 strong-to-weak 蒸馏，从旗舰模型蒸馏而来，成本低很多。</p></div>
+      <div class="pt"><h4>单模型混合思考</h4><p>同一个模型用 <code>/think</code>、<code>/no_think</code> 切换思考和非思考，可以设置思考预算。Dense 和 MoE 都是这样。</p></div>
+    </div>
+    <div class="tbl spec"><table>
+      <thead><tr><th>Dense</th><th>层数</th><th>Q / KV 头</th><th>共享 Embedding</th><th>上下文</th></tr></thead>
+      <tbody>
+        <tr><td>Qwen3-0.6B</td><td>28</td><td>16 / 8</td><td>是</td><td>32K</td></tr>
+        <tr><td>Qwen3-1.7B</td><td>28</td><td>16 / 8</td><td>是</td><td>32K</td></tr>
+        <tr><td>Qwen3-4B</td><td>36</td><td>32 / 8</td><td>是</td><td>32K</td></tr>
+        <tr><td>Qwen3-8B</td><td>36</td><td>32 / 8</td><td>否</td><td>128K（YaRN）</td></tr>
+        <tr><td>Qwen3-14B</td><td>40</td><td>40 / 8</td><td>否</td><td>128K（YaRN）</td></tr>
+        <tr><td>Qwen3-32B</td><td>64</td><td>64 / 8</td><td>否</td><td>128K（YaRN）</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="sub">
+    <div class="sub-head"><h3>MoE 版：30B-A3B、235B-A22B</h3><span class="chip moe">MoE</span><span class="chip keep">文本</span></div>
+    <div class="grid2">
+      <div class="pt"><h4>细粒度专家，无共享专家 <span class="chip new">改动</span></h4><p>128 个专家，每个 token 选 8 个。Qwen2-MoE 有共享专家，Qwen3 去掉了，目的是让每个专家学到更有区分度的知识。</p></div>
+      <div class="pt"><h4>global-batch 负载均衡 <span class="chip new">改动</span></h4><p>负载均衡 loss 在整个 global batch 上统计，不在每个 micro-batch 上统计。约束更松，同一领域的 token 可以集中到某些专家，专家分工更明显。</p></div>
+      <div class="pt"><h4>KV 头比 Dense 少</h4><p>两个 MoE 都只有 4 个 KV 头，Dense 是 8 个。MoE 的总参数大，KV cache 再压一点，长上下文推理时显存压力更小。</p></div>
+      <div class="pt"><h4>部署代价</h4><p>每个 token 的计算量按激活参数算，但显存要放下全部专家，而且需要专家并行（EP），专家之间有 all-to-all 通信。所以小尺寸更适合 Dense。</p></div>
+    </div>
+    <div class="tbl spec"><table>
+      <thead><tr><th>MoE</th><th>层数</th><th>Q / KV 头</th><th>专家 总数 / 激活</th><th>上下文</th></tr></thead>
+      <tbody>
+        <tr><td>Qwen3-30B-A3B</td><td>48</td><td>32 / 4</td><td>128 / 8</td><td>128K（YaRN）</td></tr>
+        <tr><td>Qwen3-235B-A22B</td><td>94</td><td>64 / 4</td><td>128 / 8</td><td>128K（YaRN）</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">Qwen3-2507（2025.07）：架构不变，Instruct 和 Thinking 拆成两个独立模型（4B Dense 以及 30B、235B 两个 MoE），原生上下文提到 256K。官方的理由是混合模式会让两种模式的效果互相拖累。</p>
+  </div>
+</section>
+
+<!-- ============ Qwen3-VL ============ -->
+<section id="vl" class="stack">
+  <div class="sec-head">
+    <span class="eyebrow">第一代 · 多模态</span>
+    <h2>Qwen3-VL：在 Qwen3 上接视觉</h2>
+    <div class="meta"><span>2025.09–10</span><span>图像 + 视频 + 文本</span><span>Dense 2B / 4B / 8B / 32B · MoE 30B-A3B / 235B-A22B</span><span>原生 256K，可扩展到 1M</span></div>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 960 336" role="img" aria-label="Qwen3-VL 结构图：图像经 SigLIP-2 ViT，最后一层特征经 MLP Merger 进入 LLM 输入；三个中间层特征经 DeepStack Merger 分别加到 LLM 第 1 到 3 层；文本经 tokenizer 进入同一序列；LLM 主干是 Qwen3 Dense 或 MoE">
+      <rect x="20" y="110" width="110" height="44" rx="6" class="b-io"/><text x="75" y="132" class="c">图像 / 视频</text>
+      <line x1="130" y1="132" x2="160" y2="132" class="ln arr"/>
+      <rect x="160" y="20" width="210" height="196" rx="10" class="b-vis"/>
+      <text x="265" y="38" class="c h">SigLIP-2 ViT</text>
+      <rect x="176" y="56" width="178" height="28" rx="6" class="b-norm"/><text x="265" y="70" class="c">最后一层输出</text>
+      <rect x="176" y="96" width="178" height="28" rx="6" class="b-norm"/><text x="265" y="110" class="c">中间层特征 ①</text>
+      <rect x="176" y="136" width="178" height="28" rx="6" class="b-norm"/><text x="265" y="150" class="c">中间层特征 ②</text>
+      <rect x="176" y="176" width="178" height="28" rx="6" class="b-norm"/><text x="265" y="190" class="c">中间层特征 ③</text>
+
+      <line x1="354" y1="70" x2="400" y2="70" class="ln arr"/>
+      <line x1="354" y1="110" x2="400" y2="110" class="ln arr"/>
+      <line x1="354" y1="150" x2="400" y2="150" class="ln arr"/>
+      <line x1="354" y1="190" x2="400" y2="190" class="ln arr"/>
+      <rect x="400" y="56" width="130" height="28" rx="6" class="b-vis"/><text x="465" y="70" class="c m">MLP Merger</text>
+      <rect x="400" y="96" width="130" height="28" rx="6" class="b-new"/><text x="465" y="110" class="c m">DeepStack Merger</text>
+      <rect x="400" y="136" width="130" height="28" rx="6" class="b-new"/><text x="465" y="150" class="c m">DeepStack Merger</text>
+      <rect x="400" y="176" width="130" height="28" rx="6" class="b-new"/><text x="465" y="190" class="c m">DeepStack Merger</text>
+
+      <rect x="20" y="250" width="110" height="40" rx="6" class="b-io"/><text x="75" y="270" class="c">文本</text>
+      <line x1="130" y1="270" x2="160" y2="270" class="ln arr"/>
+      <rect x="160" y="250" width="210" height="40" rx="6" class="b-norm"/><text x="265" y="270" class="c">Tokenizer（同 Qwen3）</text>
+
+      <rect x="560" y="20" width="380" height="300" rx="10" class="panel"/>
+      <text x="576" y="40" class="h">LLM 主干：Qwen3 Dense 或 MoE</text>
+      <rect x="620" y="56" width="260" height="28" rx="6" class="b-norm"/><text x="750" y="70" class="c">输入序列：视觉 token + 文本 token</text>
+      <line x1="750" y1="84" x2="750" y2="96" class="ln arr"/>
+      <rect x="620" y="96" width="260" height="28" rx="6" class="b-attn"/><text x="750" y="110" class="c">Decoder 第 1 层</text>
+      <line x1="750" y1="124" x2="750" y2="136" class="ln arr"/>
+      <rect x="620" y="136" width="260" height="28" rx="6" class="b-attn"/><text x="750" y="150" class="c">Decoder 第 2 层</text>
+      <line x1="750" y1="164" x2="750" y2="176" class="ln arr"/>
+      <rect x="620" y="176" width="260" height="28" rx="6" class="b-attn"/><text x="750" y="190" class="c">Decoder 第 3 层</text>
+      <line x1="750" y1="204" x2="750" y2="216" class="ln arr"/>
+      <rect x="620" y="216" width="260" height="28" rx="6" class="b-attn"/><text x="750" y="230" class="c">… 第 L 层</text>
+      <line x1="750" y1="244" x2="750" y2="256" class="ln arr"/>
+      <rect x="620" y="256" width="260" height="28" rx="6" class="b-io"/><text x="750" y="270" class="c">LM Head</text>
+      <text x="576" y="306" class="s">位置编码：Interleaved-MRoPE（时间 / 高 / 宽交错分配频率）</text>
+
+      <line x1="530" y1="66" x2="620" y2="66" class="ln arr"/>
+      <line x1="530" y1="110" x2="620" y2="110" class="ln dash arr"/>
+      <line x1="530" y1="150" x2="620" y2="150" class="ln dash arr"/>
+      <line x1="530" y1="190" x2="620" y2="190" class="ln dash arr"/>
+      <text x="566" y="100" class="c s">相加</text>
+      <path d="M370 270 H600 V78 H620" class="ln arr"/>
+    </svg>
+    </div>
+    <div class="legend"><span><i class="sw vis"></i>视觉通路</span><span><i class="sw attn"></i>LLM 层（Qwen3 Dense 或 MoE）</span><span><i class="sw new"></i>相对 Qwen2.5-VL 新增</span></div>
+  </figure>
+
+  <div class="grid2">
+    <div class="pt"><h4>整体结构 <span class="chip vis">多模态</span><span class="chip dense">Dense</span><span class="chip moe">MoE</span></h4><p>ViT + MLP Merger + Qwen3 LLM。Dense 版（2B/4B/8B/32B）的主干是 Qwen3 Dense，MoE 版（30B-A3B、235B-A22B）的主干是 Qwen3 MoE。LLM 部分的结构和对应的文本模型一样，视觉是在文本模型训练完之后接上的。</p></div>
+    <div class="pt"><h4>Interleaved-MRoPE <span class="chip new">改动</span></h4><p>Qwen2.5-VL 的 MRoPE 把 RoPE 的维度按块切给时间、高、宽，每个轴只拿到一段频率，频谱不均衡。Qwen3-VL 改成交错分配，每个轴都覆盖高频和低频，长视频理解更好。</p></div>
+    <div class="pt"><h4>DeepStack <span class="chip new">改动</span></h4><p>以前只用 ViT 最后一层的特征。DeepStack 还取 ViT 中间几层的特征，各自经过 Merger 后加到 LLM 前几层（报告中是前 3 层）的 hidden state 上，保留更多细粒度视觉细节，图文对齐更准。</p></div>
+    <div class="pt"><h4>文本时间戳 <span class="chip new">改动</span></h4><p>视频不再用 T-RoPE 把绝对时间编进位置，而是在帧前面插入文本形式的时间戳 token，比如 <code>&lt;3.0 seconds&gt;</code>，事件的时间定位更准。</p></div>
+  </div>
+  <p class="note">Qwen3-Omni（2025.09，30B-A3B）是全模态版本：输入文本、图像、音频、视频，用 Thinker–Talker 两个 MoE 分别负责理解和语音生成，支持流式语音输出。面试中提一句即可。</p>
+</section>
+
+<!-- ============ Qwen3-Next ============ -->
+<section id="next" class="stack">
+  <div class="sec-head">
+    <span class="eyebrow">第二代 · 转折点</span>
+    <h2>Qwen3-Next：混合注意力 + 超稀疏 MoE</h2>
+    <div class="meta"><span>2025.09</span><span>纯文本 · 只有 MoE</span><span>80B-A3B · 48 层 · hidden 2048</span><span>原生 262,144，可扩展到约 1M</span></div>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 960 690" role="img" aria-label="Qwen3-Next 结构图：48 层按 3 层 Gated DeltaNet 加 1 层 Gated Attention 重复 12 次，每层后接 512 选 10 加 1 共享专家的 MoE，另有 MTP 模块">
+      <text x="24" y="26" class="h">48 层排布：12 × [ GDN→MoE, GDN→MoE, GDN→MoE, GA→MoE ]</text>
+      <g id="strip-next"></g>
+      <rect x="24" y="86" width="12" height="12" class="c-lin"/><text x="42" y="92" class="s" dominant-baseline="central">Gated DeltaNet（线性注意力，36 层）</text>
+      <rect x="290" y="86" width="12" height="12" class="c-attn"/><text x="308" y="92" class="s" dominant-baseline="central">Gated Attention（全注意力，12 层）</text>
+      <text x="540" y="92" class="s" dominant-baseline="central">每个注意力层后面都接一个 MoE</text>
+
+      <rect x="20" y="116" width="300" height="450" rx="10" class="panel"/>
+      <text x="36" y="140" class="h">Gated DeltaNet · 75% 的层</text>
+      <rect x="125" y="156" width="90" height="26" rx="6" class="b-norm"/><text x="170" y="169" class="c m">x</text>
+      <line x1="170" y1="182" x2="57" y2="204" class="ln arr"/>
+      <line x1="170" y1="182" x2="111" y2="204" class="ln arr"/>
+      <line x1="170" y1="182" x2="165" y2="204" class="ln arr"/>
+      <line x1="170" y1="182" x2="222" y2="204" class="ln arr"/>
+      <line x1="170" y1="182" x2="279" y2="204" class="ln arr"/>
+      <rect x="34" y="204" width="46" height="28" rx="6" class="b-lin"/><text x="57" y="218" class="c m">q</text>
+      <rect x="88" y="204" width="46" height="28" rx="6" class="b-lin"/><text x="111" y="218" class="c m">k</text>
+      <rect x="142" y="204" width="46" height="28" rx="6" class="b-lin"/><text x="165" y="218" class="c m">v</text>
+      <rect x="196" y="204" width="52" height="28" rx="6" class="b-norm"/><text x="222" y="218" class="c m">α, β</text>
+      <rect x="256" y="204" width="46" height="28" rx="6" class="b-norm"/><text x="279" y="218" class="c m">z</text>
+      <line x1="57" y1="232" x2="57" y2="250" class="ln arr"/>
+      <line x1="111" y1="232" x2="111" y2="250" class="ln arr"/>
+      <line x1="165" y1="232" x2="165" y2="250" class="ln arr"/>
+      <rect x="34" y="250" width="154" height="28" rx="6" class="b-norm"/><text x="111" y="264" class="c">因果 Conv1d + SiLU</text>
+      <line x1="57" y1="278" x2="57" y2="296" class="ln arr"/>
+      <line x1="111" y1="278" x2="111" y2="296" class="ln arr"/>
+      <rect x="34" y="296" width="100" height="26" rx="6" class="b-norm"/><text x="84" y="309" class="c">L2Norm(q, k)</text>
+      <line x1="84" y1="322" x2="84" y2="344" class="ln arr"/>
+      <line x1="165" y1="278" x2="165" y2="344" class="ln arr"/>
+      <line x1="222" y1="232" x2="222" y2="344" class="ln arr"/>
+      <rect x="28" y="344" width="244" height="62" rx="6" class="b-lin"/>
+      <text x="150" y="360" class="c h">Gated Delta Rule</text>
+      <text x="150" y="378" class="c m" style="font-size:10px">S_t = α_t·S_{t−1}(I − β_t k_t k_tᵀ)</text>
+      <text x="150" y="395" class="c m" style="font-size:10px">+ β_t v_t k_tᵀ,  o_t = S_t q_t</text>
+      <line x1="150" y1="406" x2="150" y2="426" class="ln arr"/>
+      <line x1="279" y1="232" x2="279" y2="426" class="ln arr"/>
+      <rect x="34" y="426" width="268" height="28" rx="6" class="b-norm"/><text x="168" y="440" class="c">RMSNorm(o) ⊙ SiLU(z)：输出门</text>
+      <line x1="168" y1="454" x2="168" y2="476" class="ln arr"/>
+      <rect x="123" y="476" width="90" height="26" rx="6" class="b-lin"/><text x="168" y="489" class="c m">W_o</text>
+      <text x="36" y="528" class="s">QK 16 头 / V 32 头，head_dim 128</text>
+      <text x="36" y="548" class="s">状态 S 大小固定，不随序列长度增长</text>
+
+      <rect x="330" y="116" width="300" height="450" rx="10" class="panel"/>
+      <text x="346" y="140" class="h">Gated Attention · 25% 的层</text>
+      <rect x="435" y="156" width="90" height="26" rx="6" class="b-norm"/><text x="480" y="169" class="c m">x</text>
+      <line x1="480" y1="182" x2="374" y2="204" class="ln arr"/>
+      <line x1="480" y1="182" x2="438" y2="204" class="ln arr"/>
+      <line x1="480" y1="182" x2="502" y2="204" class="ln arr"/>
+      <line x1="480" y1="182" x2="576" y2="204" class="ln arr"/>
+      <rect x="346" y="204" width="56" height="28" rx="6" class="b-attn"/><text x="374" y="218" class="c m">W_q</text>
+      <rect x="410" y="204" width="56" height="28" rx="6" class="b-attn"/><text x="438" y="218" class="c m">W_k</text>
+      <rect x="474" y="204" width="56" height="28" rx="6" class="b-attn"/><text x="502" y="218" class="c m">W_v</text>
+      <rect x="538" y="204" width="76" height="28" rx="6" class="b-new"/><text x="576" y="218" class="c m">W_g</text>
+      <line x1="374" y1="232" x2="374" y2="250" class="ln arr"/>
+      <line x1="438" y1="232" x2="438" y2="250" class="ln arr"/>
+      <rect x="346" y="250" width="120" height="26" rx="6" class="b-norm"/><text x="406" y="263" class="c">QK-Norm</text>
+      <line x1="374" y1="276" x2="374" y2="296" class="ln arr"/>
+      <line x1="438" y1="276" x2="438" y2="296" class="ln arr"/>
+      <rect x="346" y="296" width="148" height="26" rx="6" class="b-new"/><text x="420" y="309" class="c">Partial RoPE 64/256</text>
+      <line x1="374" y1="322" x2="374" y2="344" class="ln arr"/>
+      <line x1="438" y1="322" x2="438" y2="344" class="ln arr"/>
+      <line x1="502" y1="232" x2="502" y2="344" class="ln arr"/>
+      <rect x="346" y="344" width="184" height="48" rx="6" class="b-attn"/>
+      <text x="438" y="360" class="c h">SDPA · GQA</text><text x="438" y="378" class="c s">16 Q / 2 KV，head_dim 256</text>
+      <line x1="438" y1="392" x2="438" y2="420" class="ln arr"/>
+      <line x1="576" y1="232" x2="576" y2="420" class="ln arr"/>
+      <rect x="346" y="420" width="268" height="30" rx="6" class="b-new"/><text x="480" y="435" class="c m">Y ⊙ σ(x·W_g)  逐头输出门</text>
+      <line x1="480" y1="450" x2="480" y2="476" class="ln arr"/>
+      <rect x="435" y="476" width="90" height="26" rx="6" class="b-attn"/><text x="480" y="489" class="c m">W_o</text>
+      <text x="346" y="528" class="s">门加在 SDPA 之后、W_o 之前</text>
+      <text x="346" y="548" class="s">只有这 12 层需要 KV cache</text>
+
+      <rect x="640" y="116" width="300" height="450" rx="10" class="panel"/>
+      <text x="656" y="140" class="h">超稀疏 MoE · 512 选 10 + 1 共享</text>
+      <rect x="745" y="156" width="90" height="26" rx="6" class="b-norm"/><text x="790" y="169" class="c m">h</text>
+      <line x1="790" y1="182" x2="790" y2="200" class="ln arr"/>
+      <rect x="695" y="200" width="190" height="28" rx="6" class="b-moe"/><text x="790" y="214" class="c">Router → Top-10</text>
+      <line x1="790" y1="228" x2="790" y2="244" class="ln arr"/>
+      <g id="grid-next"></g>
+      <text x="790" y="392" class="c s">512 个路由专家，激活 10 个</text>
+      <rect x="660" y="410" width="120" height="30" rx="6" class="b-new"/><text x="720" y="425" class="c">共享专家 × 1</text>
+      <rect x="790" y="410" width="130" height="30" rx="6" class="b-moe"/><text x="855" y="425" class="c m">Σ gᵢ·Eᵢ(h)</text>
+      <line x1="720" y1="440" x2="778" y2="466" class="ln arr"/>
+      <line x1="855" y1="440" x2="802" y2="466" class="ln arr"/>
+      <circle cx="790" cy="474" r="10" class="sum"/><text x="790" y="474" class="c">+</text>
+      <line x1="790" y1="484" x2="790" y2="500" class="ln arr"/>
+      <text x="790" y="510" class="c s">输出</text>
+      <text x="656" y="534" class="s">激活 3B / 总 80B ≈ 3.75%</text>
+      <text x="656" y="552" class="s">每个专家中间维度只有 512</text>
+
+      <rect x="20" y="588" width="920" height="88" rx="10" class="panel"/>
+      <text x="36" y="610" class="h">MTP 多 token 预测</text>
+      <text x="186" y="610" class="newt">NEW</text>
+      <rect x="40" y="628" width="130" height="32" rx="6" class="b-norm"/><text x="105" y="644" class="c">主干输出 h_t</text>
+      <line x1="170" y1="644" x2="200" y2="644" class="ln arr"/>
+      <rect x="200" y="628" width="280" height="32" rx="6" class="b-new"/><text x="340" y="644" class="c">MTP 模块（共享 Embedding / LM Head）</text>
+      <line x1="480" y1="644" x2="508" y2="644" class="ln arr"/>
+      <rect x="508" y="628" width="140" height="32" rx="6" class="b-norm"/><text x="578" y="644" class="c">额外预测 t+2 …</text>
+      <line x1="648" y1="644" x2="676" y2="644" class="ln arr"/>
+      <rect x="676" y="628" width="244" height="32" rx="6" class="b-io"/><text x="798" y="644" class="c">推理时当 draft，做投机解码</text>
+    </svg>
+    </div>
+    <div class="legend"><span><i class="sw lin"></i>线性注意力 Gated DeltaNet</span><span><i class="sw attn"></i>全注意力 Gated Attention</span><span><i class="sw moe"></i>MoE</span><span><i class="sw new"></i>相对 Qwen3 新增</span></div>
+  </figure>
+
+  <div class="grid2">
+    <div class="pt"><h4>混合注意力 3:1 <span class="chip new">核心改动</span></h4>
+      <p>75% 的层用 Gated DeltaNet。它的状态矩阵 S 大小固定，计算量随序列长度线性增长，也没有不断变大的 KV cache。剩下 25% 的层保留全注意力，用来弥补线性注意力在精确检索（in-context recall）上的不足。</p></div>
+    <div class="pt"><h4>Gated DeltaNet 原理 <span class="chip new">核心改动</span></h4>
+      <p>它是 Mamba2 的门控衰减 α 和 DeltaNet 的 delta rule β 的结合。α 控制整体遗忘多少；β 控制先擦掉 k 方向上的旧值，再写入新值，实现定向改写记忆。</p>
+      <div class="formula">S_t = α_t · S_{t−1} (I − β_t k_t k_tᵀ) + β_t v_t k_tᵀ</div></div>
+    <div class="pt"><h4>Gated Attention 输出门 <span class="chip new">核心改动</span></h4>
+      <p>在 SDPA 输出后乘一个 sigmoid 门，逐头、逐元素。它在 V 和 O 两个线性投影之间加了非线性，让输出变稀疏并依赖 query，可以消除 attention sink 和 massive activation，训练更稳，长度外推更好。</p>
+      <div class="formula">Y′ = SDPA(Q, K, V) ⊙ σ(X · W_g)</div></div>
+    <div class="pt"><h4>超稀疏 MoE + 共享专家 <span class="chip new">核心改动</span></h4>
+      <p>专家从 128 增加到 512，激活 10 个路由专家和 1 个共享专家，激活比例从约 10% 降到约 3.75%。专家变多变窄后，每个专家容量很小，需要共享专家承担通用知识，路由也更稳定。</p></div>
+    <div class="pt"><h4>训练稳定性 <span class="chip new">改动</span></h4>
+      <p>Qwen3 的 QK-Norm 中出现过个别 norm 权重异常增大的问题。Next 改成零中心 RMSNorm（权重写成 1 + γ，γ 初始化为 0），并对 γ 加 weight decay，防止它无限变大。Router 参数初始化也做了归一化。</p></div>
+    <div class="pt"><h4>MTP <span class="chip new">改动</span></h4>
+      <p>训练时多预测后续 token，提供更密的监督信号，提升预训练效果。推理时 MTP 头当 draft model，一次猜多个 token，主模型并行验证，不需要另外训练小模型。</p></div>
+  </div>
+  <p class="note">官方数据：训练成本不到 Qwen3-32B 的 10%，32K 以上上下文的吞吐约为 Qwen3-32B 的 10 倍。Qwen3-Next 分 Instruct 和 Thinking 两个版本，没有 Dense 版，也没有多模态版。</p>
+</section>
+
+<!-- ============ Qwen3.5 ============ -->
+<section id="q35" class="stack">
+  <div class="sec-head">
+    <span class="eyebrow">第三代 · 落地</span>
+    <h2>Qwen3.5：混合注意力用到 Dense 和 MoE，全系原生多模态</h2>
+    <div class="meta"><span>2026.02–03</span><span>全系多模态</span><span>Dense 0.8B / 2B / 4B / 9B / 27B · MoE 35B-A3B / 122B-A10B / 397B-A17B</span><span>原生 262,144，可扩展到 1,010,000</span></div>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 960 500" role="img" aria-label="Qwen3.5 结构图：图像经视觉编码器、文本经 248K 词表分词后交错成一个序列，进入 3:1 混合注意力主干，FFN 位置是 Dense 或 MoE，最后接 LM Head 和 MTP">
+      <rect x="20" y="40" width="120" height="40" rx="6" class="b-io"/><text x="80" y="60" class="c">图像 / 视频</text>
+      <line x1="140" y1="60" x2="170" y2="60" class="ln arr"/>
+      <rect x="170" y="40" width="150" height="40" rx="6" class="b-vis"/><text x="245" y="60" class="c">视觉编码器 ViT</text>
+      <line x1="320" y1="60" x2="350" y2="60" class="ln arr"/>
+      <rect x="350" y="40" width="130" height="40" rx="6" class="b-vis"/><text x="415" y="60" class="c">Patch Merger</text>
+
+      <rect x="20" y="110" width="120" height="40" rx="6" class="b-io"/><text x="80" y="130" class="c">文本</text>
+      <line x1="140" y1="130" x2="170" y2="130" class="ln arr"/>
+      <rect x="170" y="110" width="150" height="40" rx="6" class="b-new"/><text x="245" y="130" class="c">Tokenizer · 248K 词表</text>
+      <line x1="320" y1="130" x2="350" y2="130" class="ln arr"/>
+      <rect x="350" y="110" width="130" height="40" rx="6" class="b-norm"/><text x="415" y="130" class="c">Embedding</text>
+
+      <path d="M480 60 H500 V95 H520" class="ln arr"/>
+      <path d="M480 130 H500 V95" class="ln"/>
+      <text x="530" y="40" class="s">交错的单一序列（early fusion，预训练阶段就混合训练）</text>
+      <g id="tokens"></g>
+      <line x1="730" y1="118" x2="730" y2="180" class="ln arr"/>
+
+      <rect x="20" y="180" width="920" height="150" rx="10" class="panel"/>
+      <text x="36" y="204" class="h">混合主干 · 3:1 混合注意力 · FFN 位置是 Dense 或 MoE</text>
+      <g id="strip-q35"></g>
+      <text x="36" y="282" class="s m">N × [ GDN→FFN, GDN→FFN, GDN→FFN, GA→FFN ]　图中按 397B 的 60 层（N = 15）画</text>
+      <text x="36" y="302" class="s">Dense（0.8B–27B）：FFN 位置是 SwiGLU　·　MoE（35B / 122B / 397B）：FFN 位置是 MoE + 1 个共享专家</text>
+      <text x="36" y="320" class="s">全系 head_dim：GDN 128，GA 256，RoPE 只用 64 维；全系都带 MTP</text>
+
+      <line x1="390" y1="330" x2="390" y2="370" class="ln arr"/>
+      <line x1="590" y1="330" x2="590" y2="370" class="ln arr"/>
+      <rect x="300" y="370" width="180" height="36" rx="6" class="b-io"/><text x="390" y="388" class="c">Norm → LM Head</text>
+      <rect x="500" y="370" width="180" height="36" rx="6" class="b-norm"/><text x="590" y="388" class="c">MTP（multi-step 训练）</text>
+      <line x1="390" y1="406" x2="390" y2="440" class="ln arr"/>
+      <rect x="250" y="440" width="280" height="36" rx="6" class="b-io"/><text x="390" y="458" class="c">文本输出 · 思考 / 非思考统一</text>
+      <text x="700" y="388" class="s" dominant-baseline="central">→ 投机解码加速</text>
+    </svg>
+    </div>
+    <div class="legend"><span><i class="sw vis"></i>视觉通路</span><span><i class="sw lin"></i>Gated DeltaNet</span><span><i class="sw attn"></i>Gated Attention</span><span><i class="sw new"></i>相对 Qwen3-Next 新增</span></div>
+  </figure>
+
+  <div class="grid2">
+    <div class="pt"><h4>原生多模态 <span class="chip new">改动</span><span class="chip vis">全系</span></h4><p>Qwen3 时代是先训文本模型，再接视觉出 Qwen3-VL。Qwen3.5 在预训练阶段就把视觉 token 和文本 token 交错放进同一个序列一起训练（early fusion）。所以 Qwen3.5 没有单独的 VL 版本，每个尺寸都带视觉编码器。</p></div>
+    <div class="pt"><h4>Dense 也用上混合注意力 <span class="chip new">改动</span><span class="chip dense">Dense</span></h4><p>Qwen3-Next 只有 MoE。Qwen3.5 的 Dense 模型同样是 3:1 的 Gated DeltaNet + Gated Attention，只是 FFN 位置换成普通 SwiGLU。这说明混合注意力和 Dense / MoE 是两个独立的设计选择。</p></div>
+    <div class="pt"><h4>MoE 配置按尺寸不同 <span class="chip moe">MoE</span></h4><p>只有旗舰 397B 用 Next 的 512 选 10 + 1 共享。中尺寸的 122B-A10B 和 35B-A3B 用 256 选 8 + 1 共享。不要说成“Qwen3.5 全系 512 专家”。</p></div>
+    <div class="pt"><h4>KV 头：Dense 4 个，MoE 2 个</h4><p>全注意力层里，Dense 模型用 4 个 KV 头，MoE 模型用 2 个。和 Qwen3 一样，MoE 的 KV 压得更狠。</p></div>
+    <div class="pt"><h4>词表和语言 <span class="chip new">改动</span></h4><p>词表从 151,669 扩到约 248K（embedding 补齐到 248,320），语言从 119 种扩到 201 种。多语言文本编码效率更高，同样内容需要的 token 更少。</p></div>
+    <div class="pt"><h4>思考模式重新统一 <span class="chip new">后训练</span></h4><p>2507 和 Next 都把 Instruct / Thinking 分成两个模型。Qwen3.5 全系回到一个模型同时支持思考和非思考，后训练重点转向 Agent，在大量环境里做 RL。</p></div>
+  </div>
+
+  <div class="tbl spec"><table>
+    <thead><tr><th>Qwen3.5</th><th>类型</th><th>层数 / hidden</th><th>排布</th><th>GDN 头 QK / V</th><th>GA 头 Q / KV</th><th>FFN 位置</th></tr></thead>
+    <tbody>
+      <tr><td>9B</td><td>Dense</td><td>32 / 4096</td><td>8 × [3 GDN + 1 GA]</td><td>16 / 32</td><td>16 / 4</td><td>SwiGLU，中间维 12288</td></tr>
+      <tr><td>27B</td><td>Dense</td><td>64 / 5120</td><td>16 × [3 GDN + 1 GA]</td><td>16 / 48</td><td>24 / 4</td><td>SwiGLU，中间维 17408</td></tr>
+      <tr><td>35B-A3B</td><td>MoE</td><td>40 / 2048</td><td>10 × [3 GDN + 1 GA]</td><td>16 / 32</td><td>16 / 2</td><td>256 选 8 + 1 共享，专家中间维 512</td></tr>
+      <tr><td>122B-A10B</td><td>MoE</td><td>48 / 3072</td><td>12 × [3 GDN + 1 GA]</td><td>16 / 64</td><td>32 / 2</td><td>256 选 8 + 1 共享，专家中间维 1024</td></tr>
+      <tr><td>397B-A17B</td><td>MoE</td><td>60 / 4096</td><td>15 × [3 GDN + 1 GA]</td><td>16 / 64</td><td>32 / 2</td><td>512 选 10 + 1 共享，专家中间维 1024</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">以上取自 HF model card。0.8B、2B、4B 也是 Dense，结构相同，具体参数没有逐个核对。中尺寸系列于 2026.02.24 发布，托管版另有 Qwen3.5-Plus（对应 397B）和 Qwen3.5-Flash。全系 Apache 2.0。</p>
+</section>
+
+<!-- ============ Compare ============ -->
+<section id="compare" class="stack">
+  <div class="sec-head"><span class="eyebrow">一张表记住</span><h2>对比总表</h2></div>
+  <p>标红的格子表示相对前一代有变化。Qwen3-VL 列对比的是 Qwen3 文本模型。</p>
+  <div class="tbl"><table style="min-width:960px">
+    <thead><tr><th>维度</th><th>Qwen3</th><th>Qwen3-2507</th><th>Qwen3-VL</th><th>Qwen3-Next</th><th>Qwen3.5</th></tr></thead>
+    <tbody>
+      <tr><th>模态</th><td>文本</td><td>文本</td><td class="chg">图像 + 视频 + 文本</td><td>文本</td><td class="chg">全系原生多模态</td></tr>
+      <tr><th>Dense / MoE</th><td>Dense 0.6B–32B<br>MoE 30B、235B</td><td>Dense 4B<br>MoE 30B、235B</td><td>Dense 2B–32B<br>MoE 30B、235B</td><td class="chg">只有 MoE 80B-A3B</td><td>Dense 0.8B–27B<br>MoE 35B、122B、397B</td></tr>
+      <tr><th>注意力</th><td>全部层 GQA + QK-Norm</td><td>同 Qwen3</td><td>同 Qwen3</td><td class="chg">Gated DeltaNet : Gated Attention = 3 : 1</td><td class="chg">同 Next，Dense 和 MoE 都用</td></tr>
+      <tr><th>位置编码</th><td>RoPE（全维度）</td><td>同</td><td class="chg">Interleaved-MRoPE + 文本时间戳</td><td class="chg">只在全注意力层用 RoPE，占 256 维中的 64 维</td><td>同 Next</td></tr>
+      <tr><th>归一化</th><td>Pre-RMSNorm，QK-Norm</td><td>同</td><td>同</td><td class="chg">零中心 RMSNorm + weight decay；注意力输出加门</td><td>同 Next</td></tr>
+      <tr><th>MoE 配置</th><td>128 选 8，无共享</td><td>同</td><td>同 Qwen3</td><td class="chg">512 选 10 + 1 共享</td><td class="chg">397B：512 选 10 + 1<br>122B / 35B：256 选 8 + 1</td></tr>
+      <tr><th>激活比例</th><td>≈ 9.4%（235B）<br>≈ 10%（30B）</td><td>同</td><td>同</td><td class="chg">≈ 3.75%</td><td>≈ 4.3%（397B）<br>≈ 8.2%（122B）<br>≈ 8.6%（35B）</td></tr>
+      <tr><th>视觉接入</th><td>—</td><td>—</td><td class="chg">ViT + Merger + DeepStack，文本模型训完后再接</td><td>—</td><td class="chg">early fusion，预训练就混合</td></tr>
+      <tr><th>上下文</th><td>32K 原生，YaRN 到 128K</td><td class="chg">256K 原生</td><td class="chg">256K 原生，可扩展到 1M</td><td>256K 原生，可扩展到约 1M</td><td>同 Next</td></tr>
+      <tr><th>词表 / 语言</th><td>151,669 / 119 种</td><td>同</td><td>同</td><td>沿用 Qwen3</td><td class="chg">约 248K / 201 种</td></tr>
+      <tr><th>思考模式</th><td>单模型混合思考</td><td class="chg">拆成 Instruct / Thinking</td><td>Instruct / Thinking 两版</td><td>Instruct / Thinking 两版</td><td class="chg">重新统一到单模型</td></tr>
+      <tr><th>推理加速</th><td>—</td><td>—</td><td>—</td><td class="chg">MTP，用于投机解码</td><td>MTP，multi-step 训练</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ KV ============ -->
+<section id="kv" class="stack">
+  <div class="sec-head"><span class="eyebrow">加分项 · 自己算的数</span><h2>KV cache 估算：混合注意力省了多少</h2></div>
+  <p>面试时能当场算出一个量级会很加分。公式：每 token KV = 全注意力层数 × KV 头数 × head_dim × 2（K 和 V）× 2 字节（BF16）。下面统一按 262,144 token 计算。</p>
+  <div class="kv" role="img" aria-label="262144 token 时的 KV cache 估算，按比例画的条形图">
+    <div class="kvrow"><div class="nm">Qwen3-235B-A22B<small>MoE · 94 层全注意力 · 4 KV × 128</small></div><div class="bar"><i class="full" style="width:100%"></i></div><div class="v"><b>188 KiB</b>/token · <b>47 GiB</b></div></div>
+    <div class="kvrow"><div class="nm">Qwen3-30B-A3B<small>MoE · 48 层全注意力 · 4 KV × 128</small></div><div class="bar"><i class="full" style="width:51.1%"></i></div><div class="v"><b>96 KiB</b>/token · <b>24 GiB</b></div></div>
+    <div class="kvrow"><div class="nm">Qwen3.5-27B<small>Dense · 16 层全注意力 · 4 KV × 256</small></div><div class="bar"><i class="hyb" style="width:34%"></i></div><div class="v"><b>64 KiB</b>/token · <b>16 GiB</b> + 状态约 72 MiB</div></div>
+    <div class="kvrow"><div class="nm">Qwen3.5-397B-A17B<small>MoE · 15 层全注意力 · 2 KV × 256</small></div><div class="bar"><i class="hyb" style="width:16%"></i></div><div class="v"><b>30 KiB</b>/token · <b>7.5 GiB</b> + 状态约 90 MiB</div></div>
+    <div class="kvrow"><div class="nm">Qwen3-Next-80B-A3B<small>MoE · 12 层全注意力 · 2 KV × 256</small></div><div class="bar"><i class="hyb" style="width:12.8%"></i></div><div class="v"><b>24 KiB</b>/token · <b>6 GiB</b> + 状态约 36 MiB</div></div>
+  </div>
+  <p class="note">这是粗略估算。Qwen3-235B 原生只支持 32K，这里按 256K 算只是为了放在同一尺度上比较。线性层的状态大小与序列长度无关：线性层数 × V 头数 × 128 × 128 × 2 字节，例如 Next 是 36 × 32 × 128 × 128 × 2 ≈ 36 MiB。未计入卷积状态和 KV 量化。同为 A3B，Next 的每 token KV 只有 Qwen3-30B-A3B 的 1/4。</p>
+</section>
+
+<!-- ============ QA ============ -->
+<section id="qa" class="stack">
+  <div class="sec-head"><span class="eyebrow">自测</span><h2>高频追问</h2></div>
+  <div class="tools"><button type="button" id="openAll">全部展开</button><button type="button" id="closeAll">全部收起</button></div>
+  <div class="qa">
+    <details><summary>Dense 和 MoE 有什么区别？Qwen 为什么两条线都做？</summary><div class="ans">
+      <p>结构上只差 FFN 那一格：Dense 每个 token 都走同一个 FFN；MoE 有 Router，每个 token 只激活少数专家。注意力、Norm、Embedding 都一样。</p>
+      <p>MoE 的好处是总参数（知识容量）大，但每个 token 的计算量只取决于激活参数，同样的训练算力能得到更强的模型。代价是显存要放下所有专家，需要专家并行和 all-to-all 通信，负载均衡也难调。Dense 部署简单、显存小、好微调，适合端侧和中小规模。所以 Qwen3 和 Qwen3.5 都是小尺寸做 Dense，大尺寸做 MoE。</p></div></details>
+    <details><summary>QK-Norm 是什么？为什么用它替代 QKV bias？</summary><div class="ans">
+      <p>QK-Norm 是在 Q、K 投影之后按头做一次 RMSNorm，然后再加 RoPE。</p>
+      <p>没有 QK-Norm 时，Q·K 的数值可能越训越大，softmax 会饱和成接近 one-hot，梯度变得很差，表现为 loss spike。QK-Norm 把 Q 和 K 的尺度固定住，训练更稳定。QKV bias 在 Qwen2 里主要是为了外推，有了 QK-Norm 之后就不需要了。</p></div></details>
+    <details><summary>为什么 Qwen3 去掉共享专家，Next 又加回来？</summary><div class="ans">
+      <p>Qwen3 有 128 个专家，粒度已经比较细。去掉共享专家可以逼每个专家学到更有区分度的知识，配合 global-batch 负载均衡，专家分工更明确。</p>
+      <p>Next 扩到 512 个专家，每个专家的中间维度只有 512，单个容量很小。这时需要一个常驻的共享专家承担所有 token 都用得到的通用知识，路由专家专心做专业化，训练也更稳。两次决定是在不同稀疏度下做的取舍，并不矛盾。Qwen3.5 的 MoE 全部保留了共享专家。</p></div></details>
+    <details><summary>Qwen3-VL 的 DeepStack 和 Interleaved-MRoPE 是什么？</summary><div class="ans">
+      <p>DeepStack：普通做法只把 ViT 最后一层的特征喂给 LLM，浅层的细节信息丢了。DeepStack 额外取 ViT 中间几层的特征，各自过一个 Merger，直接加到 LLM 前几层的 hidden state 上。这样 LLM 浅层就能拿到细粒度视觉信息，序列长度也不增加。</p>
+      <p>Interleaved-MRoPE：多模态位置要表示时间、高、宽三个轴。Qwen2.5-VL 把 RoPE 维度按块切给三个轴，结果某个轴只拿到高频或低频的一段。Qwen3-VL 把三个轴交错分配，每个轴都覆盖全频段，长视频的时间建模更好。视频时间信息则改用文本时间戳 token 表示。</p></div></details>
+    <details><summary>Gated DeltaNet 的原理？和 Mamba2、DeltaNet 是什么关系？</summary><div class="ans">
+      <p>线性注意力可以看作维护一个记忆矩阵 S，每来一个 token 就更新一次，读的时候用 o = S q。</p>
+      <p>Mamba2 的思路是给 S 乘一个衰减门 α，可以整体遗忘，但不能精确改写某一条记忆。DeltaNet 用 delta rule：先把 k 方向上的旧值擦掉，再写入新值，强度由 β 控制，可以精确改写，但不能快速清空。Gated DeltaNet 把两者结合：</p>
+      <div class="formula">S_t = α_t · S_{t−1} (I − β_t k_t k_tᵀ) + β_t v_t k_tᵀ</div>
+      <p>实现上 q、k、v 先过因果卷积和 SiLU，q、k 做 L2Norm，输出再乘一个 SiLU 门。训练时用分块并行算法，推理时是 O(1) 的递推。</p></div></details>
+    <details><summary>为什么不全部换成线性注意力？3:1 是怎么来的？</summary><div class="ans">
+      <p>线性注意力把整段历史压进一个固定大小的状态，信息必然有损失。在需要精确找回前文某个细节的任务上（大海捞针、in-context recall、多跳检索），它明显不如全注意力。</p>
+      <p>所以采用混合方案：大部分层用线性注意力，低成本地传递长程信息；少量全注意力层负责精确检索。3:1 是官方实验下来效果和效率比较平衡的比例，Qwen3.5 从 9B 到 397B 都沿用了这个比例。类似的混合方案还有 Kimi Linear、MiniMax 的 Lightning Attention、Jamba 等。</p></div></details>
+    <details><summary>Gated Attention 的门加在哪？解决什么问题？</summary><div class="ans">
+      <p>门加在 SDPA 输出之后、W_o 之前，形式是 Y ⊙ σ(X W_g)，逐头、逐元素。它的输入是当前 token 的 hidden state，所以门的值依赖 query。</p>
+      <p>作用有三点。第一，W_v 和 W_o 原本都是线性变换，合起来是一个低秩的线性映射，中间加了门就有了非线性。第二，门让输出稀疏，模型不必把注意力堆到第一个 token 上当垃圾桶，attention sink 和 massive activation 因此消失。第三，训练更稳定，可以用更大的学习率，长度外推也更好。相关论文拿了 NeurIPS 2025 最佳论文。</p></div></details>
+    <details><summary>MTP 在训练和推理时分别起什么作用？</summary><div class="ans">
+      <p>训练时，除了预测下一个 token，还用额外的模块预测后面第二个、第三个 token。这给了更密的监督信号，迫使表示提前规划，可以提升预训练效果。</p>
+      <p>推理时，MTP 模块就是现成的 draft model：它先猜出后面几个 token，主模型一次前向并行验证，猜对的直接接受。这样不需要另外训练一个小模型，就能做投机解码。vLLM 和 SGLang 都已支持。</p></div></details>
+    <details><summary>思考模式为什么拆开又合起来？</summary><div class="ans">
+      <p>Qwen3 一开始用单模型混合思考。2507 版本拆开，官方说法是混合训练会让两种模式的效果互相拖累，拆开后各自都更强。</p>
+      <p>Qwen3.5 又回到统一。官方没有详细解释原因，可以这样回答：后训练的数据配比和 RL 方法改进后，冲突问题得到缓解，统一模型在部署上更省事，只需维护一套权重。回答时要说明这是自己的推断。</p></div></details>
+    <details><summary>零中心 RMSNorm 加 weight decay 解决什么问题？</summary><div class="ans">
+      <p>普通 RMSNorm 的缩放权重 γ 初始化为 1。如果对它做 weight decay，它会被往 0 拉，这显然不对，所以一般不加。Qwen 团队发现 QK-Norm 里个别 γ 会异常增大，影响稳定性。</p>
+      <p>零中心的做法是把权重写成 1 + γ，γ 初始化为 0。这样 weight decay 会把它拉回 1 附近，正好约束了异常增长。</p></div></details>
+    <details><summary>原生多模态（Qwen3.5）和后接视觉（Qwen3-VL）有什么区别？</summary><div class="ans">
+      <p>Qwen3-VL 的做法是：先有训练好的 Qwen3 文本模型，再接 ViT 和 Merger，经过对齐和多模态继续训练。视觉能力是后加的，文本和多模态要维护两套模型，而且继续训练可能会损失一些文本能力。</p>
+      <p>Qwen3.5 在预训练阶段就把图像 token 和文本 token 交错放在同一个序列里训练。视觉和语言在同一个表示空间里学，一个模型就够了，对 Agent 场景（看截图、操作界面）更友好。</p></div></details>
+  </div>
+</section>
+
+<!-- ============ Template ============ -->
+<section id="tpl" class="stack">
+  <div class="sec-head"><span class="eyebrow">2–3 分钟口述</span><h2>答题模板</h2></div>
+  <ol class="tpl">
+    <li><b>先给分类框架。</b>每一代都从两条轴看：文本还是多模态，Dense 还是 MoE。主线是降低推理成本，以及从“后接视觉”走向原生多模态。</li>
+    <li><b>讲 Qwen3 文本模型。</b>Dense 和 MoE 共用 GQA + QK-Norm、SwiGLU、RoPE、RMSNorm；MoE 只在 FFN 位置换成 128 选 8、无共享专家。单模型混合思考。</li>
+    <li><b>讲 Qwen3-VL。</b>ViT + Merger 接在 Qwen3 Dense 或 MoE 上，新增 Interleaved-MRoPE、DeepStack、文本时间戳。</li>
+    <li><b>讲 Next 的转折。</b>只有 MoE、纯文本。3:1 混合注意力及原因、Gated Attention 输出门、512 选 10 + 1 共享、MTP。可以顺手报出 KV cache 估算的量级。</li>
+    <li><b>讲 Qwen3.5 落地。</b>混合注意力同时用到 Dense 和 MoE；全系原生多模态，不再单出 VL；词表 248K、201 种语言；思考模式重新统一。</li>
+    <li><b>给出判断。</b>竞争重点从堆参数转向单位推理成本下的能力。长上下文和 Agent 让 KV cache 成为瓶颈，各家都在做稀疏注意力或线性注意力，只是取舍不同。</li>
+  </ol>
+  <p class="note">常见失分点：说 Qwen3 有共享专家（没有）；说 Qwen3-Next 有 Dense 或多模态版（都没有）；说 Qwen3.5 全系都是 512 专家（只有 397B 是，中尺寸 MoE 是 256 选 8）；以为 Qwen3.5 Dense 还是标准全注意力（也是 3:1 混合）；把 Gated DeltaNet 说成 Mamba（它借鉴了 Mamba2 的门控，但核心是 delta rule）；把 Gated Attention 的门说成加在 softmax 之前（实际在 SDPA 输出之后）。拿不准的数字就说量级。</p>
+  <div class="src">资料来源：
+    <ul>
+      <li><a href="https://arxiv.org/abs/2505.09388">Qwen3 Technical Report</a> · <a href="https://arxiv.org/abs/2511.21631">Qwen3-VL Technical Report</a></li>
+      <li><a href="https://huggingface.co/Qwen/Qwen3-VL-235B-A22B-Instruct">Qwen3-VL-235B-A22B model card</a> · <a href="https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct">Qwen3-Next-80B-A3B model card</a></li>
+      <li>Qwen3.5 model card：<a href="https://huggingface.co/Qwen/Qwen3.5-397B-A17B">397B-A17B</a> · <a href="https://huggingface.co/Qwen/Qwen3.5-122B-A10B">122B-A10B</a> · <a href="https://huggingface.co/Qwen/Qwen3.5-35B-A3B">35B-A3B</a> · <a href="https://huggingface.co/Qwen/Qwen3.5-27B">27B</a> · <a href="https://huggingface.co/Qwen/Qwen3.5-9B">9B</a></li>
+      <li><a href="https://arxiv.org/abs/2412.06464">Gated Delta Networks</a> · <a href="https://arxiv.org/abs/2505.06708">Gated Attention for LLMs</a></li>
+    </ul>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg";
+  function rect(g,x,y,w,h,cls){var r=document.createElementNS(NS,"rect");r.setAttribute("x",x);r.setAttribute("y",y);r.setAttribute("width",w);r.setAttribute("height",h);r.setAttribute("rx",1.5);r.setAttribute("class",cls);g.appendChild(r);}
+  function strip(id,n,x0,y,w,h,step,gap){var g=document.getElementById(id);if(!g)return;
+    for(var i=0;i<n;i++){rect(g,x0+i*step+Math.floor(i/4)*gap,y,w,h,i%4===3?"c-attn":"c-lin");}}
+  function grid(id,cols,rows,x0,y0,size,step,on){var g=document.getElementById(id);if(!g)return;
+    for(var i=0;i<cols*rows;i++){rect(g,x0+(i%cols)*step,y0+Math.floor(i/cols)*step,size,size,on.indexOf(i)>=0?"cell-on":"cell-off");}}
+  strip("strip-next",48,24,40,15,30,17,7);
+  strip("strip-q35",60,40,220,11,34,13,5);
+  grid("grid-q3",16,8,676,378,12,15,[3,21,38,54,70,91,105,122]);
+  grid("grid-next",32,16,660,248,6.5,8.2,[17,60,101,150,199,260,311,370,423,488]);
+  // 交错 token 序列：文本 / 图像块 / 文本
+  var t=document.getElementById("tokens"),kinds="tttttvvvvvvvvvvttttttvvvvvvvtttt";
+  if(t){for(var i=0;i<kinds.length;i++){var r=document.createElementNS(NS,"rect");
+    r.setAttribute("x",530+i*12.6);r.setAttribute("y",80);r.setAttribute("width",10);r.setAttribute("height",30);r.setAttribute("rx",2);
+    r.setAttribute("class",kinds[i]==="v"?"b-vis":"b-norm");t.appendChild(r);}}
+  var ds=document.querySelectorAll("#qa details");
+  document.getElementById("openAll").addEventListener("click",function(){ds.forEach(function(d){d.open=true;});});
+  document.getElementById("closeAll").addEventListener("click",function(){ds.forEach(function(d){d.open=false;});});
+})();
+</script>
+</body>
+</html>
