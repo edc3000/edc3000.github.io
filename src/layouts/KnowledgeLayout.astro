@@ -92,9 +92,10 @@ const currentCategory = currentId ? categoryOf(currentId) : undefined;
 <style>
   .kb {
     display: grid;
-    grid-template-columns: 236px minmax(0, 1fr) 200px;
-    gap: 40px;
-    max-width: 1360px;
+    /* 中间栏要放下精排版里 760px 的架构图和 840px 的表格,所以不设总宽上限,
+       窄到放不下时先收右栏、再把左栏收成抽屉,而不是让正文横向滚动 */
+    grid-template-columns: 220px minmax(0, 1fr) 180px;
+    gap: 32px;
     margin: 0 auto;
     padding: 28px 20px 0;
     align-items: start;
@@ -143,13 +144,13 @@ const currentCategory = currentId ? categoryOf(currentId) : undefined;
   .kb-drawer-btn { display: none; }
 
   /* 中屏:去掉右栏 */
-  @media (max-width: 1180px) {
-    .kb { grid-template-columns: 220px minmax(0, 1fr); gap: 32px; }
+  @media (max-width: 1439px) {
+    .kb { grid-template-columns: 220px minmax(0, 1fr); }
     .kb-toc { display: none; }
   }
 
   /* 窄屏:左栏变抽屉 */
-  @media (max-width: 860px) {
+  @media (max-width: 1219px) {
     .kb { grid-template-columns: minmax(0, 1fr); padding-top: 16px; }
     .kb-drawer-btn {
       display: inline-block; justify-self: start;

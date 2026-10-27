@@ -35,7 +35,11 @@ const { src, title } = Astro.props;
     syncTheme();
     // 构建期给精排版注入的"返回站内"浮钮,在这里由侧栏承担
     doc.querySelector('.site-back-link')?.remove();
-    const fit = () => (frame.style.height = `${doc.body.offsetHeight}px`);
+    // iframe 撑满内容高度,自身不该滚动;关掉滚动条可避免"出现滚动条→变窄→变高"的来回抖动
+    doc.documentElement.style.overflow = 'hidden';
+    // 向上取整并加上 iframe 自身边框,否则差零点几像素就会裁掉内容底部
+    const border = frame.offsetHeight - frame.clientHeight;
+    const fit = () => (frame.style.height = `${Math.ceil(doc.body.getBoundingClientRect().height) + border}px`);
     fit();
     new win.ResizeObserver(fit).observe(doc.body);
     // iframe 已撑满高度、自身不滚动,页内锚点要改为滚动外层页面
