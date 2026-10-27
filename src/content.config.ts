@@ -64,9 +64,18 @@ const skills = defineCollection({
   }),
 });
 
+// 分类由所在文件夹决定(见 src/lib/knowledge-base.ts),不写进 frontmatter
 const interview = defineCollection({
   loader: glob({ pattern: '**/*.md', base: './src/content/interview' }),
-  schema: z.object(base),
+  schema: z.object({
+    ...base,
+    order: z.number().default(100),
+    // 侧栏里分类下的小标题,不成页、不进 URL
+    group: z.string().optional(),
+    // 正文是自包含 HTML 时填它的 public 路径,条目页在侧栏布局里嵌入显示;
+    // 与 richReport 不同,链接仍指向带侧栏的条目页
+    embed: z.string().optional(),
+  }),
 });
 
 export const collections = { competitions, papers, algorithms, skills, interview };

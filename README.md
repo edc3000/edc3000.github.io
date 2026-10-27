@@ -105,7 +105,37 @@ originalAuthor: "原作者名"
 ---
 ```
 
-LLMs八股没有特有字段,只用共有的 `title` / `date` / `description` / `tags` / `richReport`。
+LLMs八股是带侧栏目录的知识库,条目放在分类文件夹里,文件夹即分类:
+
+```
+src/content/interview/
+  basics/        基础知识
+  architecture/  模型架构
+  algorithms/    算法
+  infra/         Infra
+  agent/         Agent
+  scenarios/     场景题
+```
+
+分类的中文名、简介和顺序登记在 `src/lib/knowledge-base.ts`,放进未登记的文件夹会构建失败。
+文件名里不要带 `.`(会被 slug 化吞掉),URL 是 `/interview/<分类>/<文件名>/`。
+
+```yaml
+---
+title: "GQA 为什么省显存"
+date: 2026-10-27
+description: "摘要"
+tags: ["attention", "高频"]
+order: 10            # 分类内排序,小的在前,默认 100
+group: "Attention 变体"  # 可选,侧栏里分类下的小标题
+embed: "/reports/interview/xxx.html"  # 可选,正文是自包含 HTML 时填
+---
+```
+
+正文写 Markdown 就直接写在 `.md` 里;正文是精排版 HTML 时填 `embed` 而不是 `richReport`,
+条目页会在侧栏布局里用 iframe 嵌入它。那份 HTML 照常带 `data-pagefind-body`,并在 `<head>` 里加
+`<meta data-pagefind-meta="url[content]" content="/interview/<分类>/<文件名>/">`,
+让搜索结果跳到带侧栏的条目页;右栏页内目录取自 HTML 里带 `id` 的 `<section>` 及其 `<h2>`。
 
 ## 下线或删除文章
 

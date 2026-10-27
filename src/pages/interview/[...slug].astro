@@ -1,17 +1,72 @@
 ---
-import PostLayout from '../../layouts/PostLayout.astro';
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import KnowledgeLayout from '../../layouts/KnowledgeLayout.astro';
+import EmbedFrame from '../../components/EmbedFrame.astro';
 import { getCollection, render } from 'astro:content';
-import { needsDetailPage } from '../../lib/collections';
+import { INTERVIEW_CATEGORIES, categoryOf, neighbors, sectionsFromHtml } from '../../lib/knowledge-base';
+import { getKbTree } from '../../lib/kb-collection';
+import { formatDate } from '../../lib/format';
 
 export async function getStaticPaths() {
   const entries = await getCollection('interview', ({ data }) => !data.draft);
-  return entries.filter(needsDetailPage).map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
 }
 
 const { entry } = Astro.props;
-const { Content } = await render(entry);
 const d = entry.data;
+const { Content, headings } = await render(entry);
+const category = INTERVIEW_CATEGORIES.find((c) => c.key === categoryOf(entry.id))!;
+const { prev, next } = neighbors(await getKbTree(), entry.id);
+
+const toc = d.embed
+  ? sectionsFromHtml(await readFile(path.join(process.cwd(), 'public', d.embed), 'utf8')).map((s) => ({ ...s, depth: 2 }))
+  : headings.filter((h) => h.depth === 2 || h.depth === 3).map((h) => ({ id: h.slug, text: h.text, depth: h.depth }));
 ---
-<PostLayout title={d.title} description={d.description} date={d.date} tags={d.tags}>
-  <Content />
-</PostLayout>
+<KnowledgeLayout title={`${d.title} · LLMs八股`} description={d.description} currentId={entry.id} toc={toc}>
+  {/* 嵌入页的正文由那份 HTML 自己带 data-pagefind-body 建索引,这里不重复标记 */}
+  <article data-pagefind-body={d.embed ? undefined : ''}>
+    <p class="crumb">
+      <a href="/interview/">LLMs八股</a> › {category.label}{d.group && <> › {d.group}</>}
+    </p>
+    {/* 嵌入的 HTML 自带大标题,这里的 h1 只给读屏与文档大纲 */}
+    <h1 class:list={[{ 'sr-only': d.embed }]}>{d.title}</h1>
+    <p class="meta">
+      <time datetime={d.date.toISOString()}>{formatDate(d.date)}</time>
+      {d.tags.map((t) => <a class="tag" href={`/tags/${t}/`}>#{t}</a>)}
+    </p>
+    {d.embed ? <EmbedFrame src={d.embed} title={d.title} /> : <div class="prose"><Content /></div>}
+  </article>
+
+  <nav class="pager" aria-label="上一条与下一条">
+    {prev ? <a class="prev" href={`/interview/${prev.id}/`}><span>上一条</span>{prev.title}</a> : <span />}
+    {next && <a class="next" href={`/interview/${next.id}/`}><span>下一条</span>{next.title}</a>}
+  </nav>
+</KnowledgeLayout>
+
+<style>
+  .crumb { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+  .crumb a { color: var(--muted); }
+  h1 { margin: 0 0 8px; line-height: 1.35; }
+  .meta { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 20px; font-size: 14px; color: var(--muted); }
+  .tag { color: var(--green); text-decoration: none; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .prose :global(h2) { margin-top: 40px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .prose :global(blockquote) {
+    margin: 0; padding: 8px 16px;
+    border-left: 3px solid var(--green);
+    background: var(--paper-light); color: var(--muted);
+  }
+  .pager { display: flex; justify-content: space-between; gap: 16px; margin-top: 32px; }
+  .pager a {
+    display: flex; flex-direction: column; gap: 2px; max-width: 48%;
+    padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px;
+    color: var(--ink); text-decoration: none; background: var(--paper-light);
+  }
+  .pager a:hover { border-color: var(--green); }
+  .pager a span { font-size: 12px; color: var(--muted); }
+  .pager .next { margin-left: auto; text-align: right; }
+</style>

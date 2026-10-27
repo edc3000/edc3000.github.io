@@ -1,0 +1,172 @@
+---
+import BaseHead from '../components/BaseHead.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import { getKbTree } from '../lib/kb-collection';
+import { categoryOf } from '../lib/knowledge-base';
+import '../styles/global.css';
+
+interface TocItem {
+  id: string;
+  text: string;
+  depth: number;
+}
+
+interface Props {
+  title: string;
+  description: string;
+  /** 当前条目 id;知识库首页不传,此时所有分类展开 */
+  currentId?: string;
+  toc?: TocItem[];
+}
+const { title, description, currentId, toc = [] } = Astro.props;
+const tree = await getKbTree();
+const currentCategory = currentId ? categoryOf(currentId) : undefined;
+---
+<html lang="zh-CN">
+  <head>
+    <BaseHead title={title} description={description} />
+  </head>
+  <body>
+    <Header />
+    <div class="kb">
+      <button class="kb-drawer-btn" type="button" aria-controls="kb-nav" aria-expanded="false">☰ 目录</button>
+      <aside id="kb-nav" class="kb-nav" aria-label="LLMs八股目录">
+        <a class="kb-home" href="/interview/" aria-current={currentId ? undefined : 'page'}>LLMs八股</a>
+        {tree.map((cat) => (
+          <details open={!currentId || cat.key === currentCategory}>
+            <summary>
+              <span>{cat.label}</span>
+              <span class="kb-count">{cat.count}</span>
+            </summary>
+            {cat.count === 0 ? (
+              <p class="kb-empty">筹备中</p>
+            ) : (
+              cat.groups.map((g) => (
+                <>
+                  {g.name && <p class="kb-group">{g.name}</p>}
+                  <ul>
+                    {g.entries.map((e) => (
+                      <li>
+                        <a href={`/interview/${e.id}/`} aria-current={e.id === currentId ? 'page' : undefined}>{e.title}</a>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ))
+            )}
+          </details>
+        ))}
+      </aside>
+      <main class="kb-main">
+        <slot />
+      </main>
+      {toc.length > 0 && (
+        <nav class="kb-toc" aria-label="本页目录">
+          <p class="kb-toc-title">本页目录</p>
+          <ul>
+            {toc.map((t) => (
+              <li class={`d${t.depth}`}><a href={`#${t.id}`} data-toc-target={t.id}>{t.text}</a></li>
+            ))}
+          </ul>
+        </nav>
+      )}
+    </div>
+    <Footer />
+
+    <script>
+      // 窄屏下左栏是抽屉
+      const btn = document.querySelector<HTMLButtonElement>('.kb-drawer-btn');
+      const nav = document.getElementById('kb-nav');
+      const setOpen = (open: boolean) => {
+        nav?.classList.toggle('open', open);
+        btn?.setAttribute('aria-expanded', String(open));
+      };
+      btn?.addEventListener('click', () => setOpen(!nav?.classList.contains('open')));
+      document.addEventListener('keydown', (e) => e.key === 'Escape' && setOpen(false));
+      nav?.addEventListener('click', (e) => (e.target as Element).closest('a') && setOpen(false));
+    </script>
+  </body>
+</html>
+
+<style>
+  .kb {
+    display: grid;
+    grid-template-columns: 236px minmax(0, 1fr) 200px;
+    gap: 40px;
+    max-width: 1360px;
+    margin: 0 auto;
+    padding: 28px 20px 0;
+    align-items: start;
+  }
+  .kb-main { min-width: 0; }
+
+  .kb-nav, .kb-toc {
+    position: sticky; top: 16px;
+    max-height: calc(100vh - 32px); overflow-y: auto;
+    font-size: 14px; line-height: 1.5;
+  }
+  .kb-home {
+    display: block; margin-bottom: 14px;
+    font-weight: 700; font-size: 16px; color: var(--ink); text-decoration: none;
+  }
+  .kb-home[aria-current='page'] { color: var(--green); }
+  details { border-top: 1px solid var(--line); padding-block: 8px; }
+  summary {
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; font-weight: 600; color: var(--ink); list-style: none; padding: 2px 0;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: '▸'; color: var(--muted); margin-right: 6px; font-size: 12px; }
+  details[open] > summary::before { content: '▾'; }
+  summary > span:first-child { flex: 1; }
+  .kb-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .kb-group { margin: 8px 0 2px 18px; font-size: 12px; color: var(--muted); letter-spacing: 0.04em; }
+  .kb-empty { margin: 4px 0 2px 18px; font-size: 13px; color: var(--muted); }
+  ul { list-style: none; margin: 2px 0 0; padding: 0; }
+  .kb-nav li a {
+    display: block; padding: 4px 8px 4px 18px; border-radius: 6px;
+    color: var(--muted); text-decoration: none;
+  }
+  .kb-nav li a:hover { color: var(--ink); background: var(--paper-light); }
+  .kb-nav li a[aria-current='page'] {
+    color: var(--green); font-weight: 600;
+    background: color-mix(in srgb, var(--green) 10%, transparent);
+  }
+
+  .kb-toc { border-left: 1px solid var(--line); padding-left: 16px; }
+  .kb-toc-title { margin: 0 0 8px; font-size: 12px; color: var(--muted); letter-spacing: 0.08em; }
+  .kb-toc li a { display: block; padding: 3px 0; color: var(--muted); text-decoration: none; }
+  .kb-toc li a:hover { color: var(--green); }
+  .kb-toc li.d3 a { padding-left: 12px; font-size: 13px; }
+
+  .kb-drawer-btn { display: none; }
+
+  /* 中屏:去掉右栏 */
+  @media (max-width: 1180px) {
+    .kb { grid-template-columns: 220px minmax(0, 1fr); gap: 32px; }
+    .kb-toc { display: none; }
+  }
+
+  /* 窄屏:左栏变抽屉 */
+  @media (max-width: 860px) {
+    .kb { grid-template-columns: minmax(0, 1fr); padding-top: 16px; }
+    .kb-drawer-btn {
+      display: inline-block; justify-self: start;
+      font: inherit; font-size: 14px; color: var(--ink);
+      background: var(--paper-light); border: 1px solid var(--line); border-radius: 6px;
+      padding: 4px 12px; cursor: pointer;
+    }
+    .kb-nav {
+      position: fixed; inset: 0 auto 0 0; z-index: 50;
+      width: min(300px, 85vw); max-height: none; padding: 20px;
+      background: var(--paper); border-right: 1px solid var(--line);
+      box-shadow: 0 0 24px rgb(0 0 0 / 0.18);
+      transform: translateX(-105%); transition: transform 0.2s ease;
+    }
+    .kb-nav.open { transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .kb-nav { transition: none; }
+  }
+</style>

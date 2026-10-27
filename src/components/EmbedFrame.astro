@@ -1,0 +1,76 @@
+---
+/**
+ * 在知识库布局里嵌入一份自包含的精排版 HTML(同源 iframe)。
+ * 用 iframe 而不是把 HTML 内联进来:那份 HTML 自带 :root/body 级样式,内联会和站点样式互相覆盖。
+ * 加载后撑开到内容高度,由外层页面滚动;同时同步站点主题、接管页内锚点跳转。
+ */
+interface Props {
+  src: string;
+  title: string;
+}
+const { src, title } = Astro.props;
+---
+<iframe class="kb-embed" data-kb-embed src={src} title={title}></iframe>
+
+<script>
+  const frame = document.querySelector<HTMLIFrameElement>('iframe[data-kb-embed]');
+
+  const scrollToTarget = (id: string, smooth = true) => {
+    const el = frame?.contentDocument?.getElementById(id);
+    if (!frame || !el) return false;
+    const top = frame.getBoundingClientRect().top + window.scrollY + el.getBoundingClientRect().top - 16;
+    window.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
+    return true;
+  };
+
+  const syncTheme = () => {
+    const doc = frame?.contentDocument;
+    if (doc) doc.documentElement.dataset.theme = document.documentElement.dataset.theme ?? 'light';
+  };
+
+  const init = () => {
+    const doc = frame?.contentDocument;
+    const win = frame?.contentWindow as (Window & typeof globalThis) | null;
+    if (!frame || !doc || !win || doc.URL === 'about:blank') return;
+    syncTheme();
+    // 构建期给精排版注入的"返回站内"浮钮,在这里由侧栏承担
+    doc.querySelector('.site-back-link')?.remove();
+    const fit = () => (frame.style.height = `${doc.body.offsetHeight}px`);
+    fit();
+    new win.ResizeObserver(fit).observe(doc.body);
+    // iframe 已撑满高度、自身不滚动,页内锚点要改为滚动外层页面
+    doc.addEventListener('click', (e) => {
+      const a = (e.target as Element).closest?.('a[href^="#"]');
+      const id = a?.getAttribute('href')?.slice(1);
+      if (id && scrollToTarget(id)) {
+        e.preventDefault();
+        history.replaceState(null, '', `#${id}`);
+      }
+    });
+    if (location.hash) scrollToTarget(decodeURIComponent(location.hash.slice(1)), false);
+  };
+
+  if (frame) {
+    frame.addEventListener('load', init);
+    if (frame.contentDocument?.readyState === 'complete') init();
+    new MutationObserver(syncTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    for (const a of document.querySelectorAll<HTMLAnchorElement>('a[data-toc-target]')) {
+      a.addEventListener('click', (e) => {
+        if (scrollToTarget(a.dataset.tocTarget!)) {
+          e.preventDefault();
+          history.replaceState(null, '', `#${a.dataset.tocTarget}`);
+        }
+      });
+    }
+  }
+</script>
+
+<style>
+  .kb-embed {
+    display: block; width: 100%;
+    /* 脚本撑开前的初始高度:没有脚本时也能在框内滚动阅读 */
+    height: 100vh;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--paper-light);
+  }
+</style>
