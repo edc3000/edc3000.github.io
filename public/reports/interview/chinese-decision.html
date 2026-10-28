@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- 搜索结果跳到知识库里带侧栏的条目页,而不是这份裸 HTML -->
+<meta data-pagefind-meta="url[content]" content="/interview/architecture/chinese-decision/">
+<meta name="description" content="chinese-decision 决策模型的推理与训练拆解:末位字母 logits、候选内 softmax、软标签交叉熵、LoRA、RLCD 与温度校准。">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>决策模型推理与训练</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column. Part 1 = inference pipeline + logit lab; part 2 = training pipeline + cross-entropy lab + RLCD lab */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --fg: #18202b;
+  --muted: #5d6877;
+  --line: #d9dee6;
+  --accent: #1f5fbf;
+  --accent-soft: #e3ecfa;
+  --pick: #c2410c;
+  --pick-soft: #fdeadf;
+  --good: #1f7a4d;
+  --good-soft: #def3e8;
+  --mask: #e9ecf1;
+  --mask-fg: #a3abb8;
+  --code-bg: #eef1f5;
+  --font-display: "Noto Serif SC", "Songti SC", serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151b; --surface: #181e26; --fg: #e4e8ee; --muted: #97a2b2; --line: #2b3440;
+    --accent: #79a8f0; --accent-soft: #1c2a40; --pick: #f59e6b; --pick-soft: #3a2418;
+    --good: #5fcf98; --good-soft: #163327; --mask: #1f262f; --mask-fg: #56606e; --code-bg: #1d242d; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151b; --surface: #181e26; --fg: #e4e8ee; --muted: #97a2b2; --line: #2b3440;
+  --accent: #79a8f0; --accent-soft: #1c2a40; --pick: #f59e6b; --pick-soft: #3a2418;
+  --good: #5fcf98; --good-soft: #163327; --mask: #1f262f; --mask-fg: #56606e; --code-bg: #1d242d; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.7; }
+.wrap { max-width: 900px; margin: 0 auto; padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.3; }
+h1 { font-size: 30px; }
+h2 { font-size: 21px; }
+p { margin: 0; max-width: 68ch; }
+code, pre, .mono { font-family: var(--font-mono); font-size: 13px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+header { display: grid; gap: 12px; }
+.note { font-size: 13px; color: var(--muted); border-left: 3px solid var(--line); padding-left: 12px; }
+.note b { color: var(--fg); }
+.sub { color: var(--muted); font-size: 13px; }
+
+/* parts */
+.part { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.part > .steps { margin-top: 14px; }
+.sec-head { display: grid; gap: 4px; }
+.parts-nav { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.parts-nav > div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font-size: 13px; display: grid; gap: 4px; align-content: start; }
+.parts-nav b { font-size: 14px; }
+@media (max-width: 620px) { .parts-nav { grid-template-columns: 1fr; } }
+
+/* pipeline */
+.steps { display: grid; gap: 28px; }
+.step { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px; }
+.step .n { width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--accent); color: var(--accent);
+  display: grid; place-items: center; font-family: var(--font-mono); font-weight: 600; font-size: 14px; }
+.step .body { display: grid; gap: 10px; min-width: 0; }
+.step h3 { margin: 4px 0 0; font-size: 17px; }
+
+pre { background: var(--code-bg); border-radius: 8px; padding: 14px 16px; margin: 0; overflow-x: auto;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.65; }
+.tpl { color: var(--muted); }
+.cand { color: var(--accent); font-weight: 600; }
+.slot { background: var(--pick-soft); color: var(--pick); border: 1px dashed var(--pick); border-radius: 4px; padding: 0 6px; font-weight: 600; }
+
+.fan { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.fan div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.fan b { display: block; font-family: var(--font-mono); font-size: 13px; color: var(--accent); }
+@media (max-width: 560px) { .fan { grid-template-columns: 1fr; } }
+
+/* where the input ends and where the logits are read */
+.seqwrap { overflow-x: auto; padding-bottom: 4px; }
+.seq { display: flex; align-items: flex-start; gap: 4px; width: max-content; }
+.tok { display: grid; justify-items: center; gap: 4px; }
+.tok span { font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--line); background: var(--surface);
+  border-radius: 5px; padding: 4px 7px; white-space: pre; }
+.tok.tmpl span { color: var(--muted); }
+.tok.last span { border: 2px solid var(--pick); color: var(--pick); font-weight: 600; }
+.tok.ghost span { border: 1.5px dashed var(--mask-fg); color: var(--mask-fg); text-decoration: line-through; }
+.tok small { font-size: 11px; color: var(--muted); line-height: 1.3; text-align: center; }
+.tok.last small { color: var(--pick); }
+.seqgap { align-self: center; color: var(--muted); font-family: var(--font-mono); font-size: 12px; padding: 0 4px; }
+.readout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.readout > div { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: var(--surface); display: grid; gap: 8px; align-content: start; min-width: 0; }
+.vocab { display: grid; gap: 4px; font-family: var(--font-mono); font-size: 12px; }
+.vocab div { display: grid; grid-template-columns: 52px minmax(0, 1fr) 44px; gap: 8px; align-items: center; }
+.vocab i { display: block; height: 10px; border-radius: 3px; background: var(--accent); }
+.vocab .drop { color: var(--mask-fg); }
+.vocab .drop i { background: var(--mask); }
+@media (max-width: 620px) { .readout { grid-template-columns: 1fr; } }
+
+/* training pipeline */
+.mix { display: grid; gap: 6px; }
+.mixrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) 110px; gap: 10px; align-items: center; font-size: 13px; }
+.mixrow .track { height: 14px; background: var(--mask); border-radius: 3px; overflow: hidden; }
+.mixrow .fill { height: 100%; background: var(--accent); min-width: 2px; }
+.mixrow output { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.pair > div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font-size: 13px; display: grid; gap: 6px; align-content: start; }
+.pair b { font-size: 13px; }
+@media (max-width: 620px) { .pair { grid-template-columns: 1fr; } }
+
+.lora { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 13px; }
+.lora .blk { border: 1.5px solid var(--line); border-radius: 6px; padding: 8px 12px; background: var(--surface); }
+.lora .frozen { border-style: dashed; color: var(--muted); }
+.lora .train { border-color: var(--pick); color: var(--pick); background: var(--pick-soft); }
+
+/* labs */
+.lab { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+.lab h4 { margin: 0 0 8px; font-size: 14px; color: var(--muted); font-weight: 500; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tabs button { font: inherit; font-size: 14px; border: 1px solid var(--line); background: transparent; color: var(--fg);
+  padding: 6px 14px; border-radius: 999px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { font: inherit; font-size: 14px; border: 1px solid var(--accent); background: var(--accent); color: var(--surface);
+  padding: 6px 14px; border-radius: 8px; cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--fg); border-color: var(--line); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.seg button { font: inherit; font-size: 13px; border: 0; background: transparent; color: var(--fg); padding: 5px 14px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+.check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.tabs button:focus-visible, .btn:focus-visible, .seg button:focus-visible, .lab input:focus-visible, .lab .preset:focus-visible { outline: 2px solid var(--pick); outline-offset: 2px; }
+
+.letters { display: grid; grid-template-columns: repeat(13, minmax(0, 1fr)); gap: 4px; }
+.letters div { border-radius: 6px; text-align: center; padding: 4px 0; font-family: var(--font-mono); font-size: 12px; line-height: 1.3; }
+.letters .on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.letters .on.top { background: var(--pick-soft); color: var(--pick); }
+.letters .off { background: var(--mask); color: var(--mask-fg); }
+.letters small { display: block; font-size: 10px; font-weight: 400; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+.controls { display: grid; gap: 10px; }
+.ctl { display: grid; grid-template-columns: 170px minmax(0, 1fr) 64px; gap: 12px; align-items: center; font-size: 13px; }
+.ctl label { min-width: 0; overflow-wrap: anywhere; }
+.ctl output { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.ctl input { width: 100%; accent-color: var(--accent); }
+.ctl.temp input { accent-color: var(--pick); }
+.presets { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.preset { font: inherit; border: 1px solid var(--line); background: transparent; color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+@media (max-width: 560px) { .ctl { grid-template-columns: 1fr 56px; } .ctl input { grid-column: 1 / -1; grid-row: 2; } }
+
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 500; color: var(--muted); font-size: 12px; }
+td.mono { font-family: var(--font-mono); }
+td.pos { color: var(--good); font-weight: 600; }
+td.neg { color: var(--pick); }
+tr.top td { color: var(--pick); font-weight: 600; }
+
+.bars { display: grid; gap: 8px; }
+.bar { display: grid; grid-template-columns: 150px minmax(0, 1fr) 64px; gap: 12px; align-items: center; font-size: 13px; }
+.bar .track { height: 18px; background: var(--mask); border-radius: 4px; overflow: hidden; }
+.bar .fill { height: 100%; background: var(--accent); transition: width .2s ease; }
+.bar.top .fill { background: var(--pick); }
+.bar output { font-family: var(--font-mono); text-align: right; }
+@media (max-width: 560px) { .bar { grid-template-columns: 96px minmax(0, 1fr) 52px; } }
+
+.result { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.result .explain { font-size: 13px; display: grid; gap: 8px; align-content: start; }
+.formula { font-family: var(--font-mono); font-size: 13px; background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow-x: auto; }
+@media (max-width: 700px) { .result { grid-template-columns: 1fr; } }
+
+.cmp { display: grid; gap: 10px; }
+.cmprow { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: center; font-size: 13px; }
+.dual { display: grid; gap: 3px; }
+.dual .track { height: 12px; background: var(--mask); border-radius: 3px; overflow: hidden; position: relative; }
+.dual .fill { height: 100%; transition: width .25s ease; }
+.dual .p .fill { background: var(--accent); }
+.dual .y .fill { background: var(--good); }
+.dual .lbl { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+@media (max-width: 560px) { .cmprow { grid-template-columns: 1fr; gap: 4px; } }
+@media (prefers-reduced-motion: reduce) { .bar .fill, .dual .fill { transition: none; } }
+
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; }
+.stat span { font-size: 12px; color: var(--muted); }
+.stat strong { font-family: var(--font-mono); font-size: 20px; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .stats { grid-template-columns: 1fr; } }
+
+svg text { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.chart { width: 100%; height: auto; display: block; }
+
+.facts { display: grid; gap: 10px; }
+.facts h3 { margin: 6px 0 0; font-size: 16px; }
+.facts ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.facts li { max-width: 72ch; }
+</style>
+</head>
+<body data-pagefind-body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">大模型面试八股 · 架构篇 · chinese-decision</div>
+    <h1>决策模型：推理与训练拆解</h1>
+    <p>chinese-decision 在 Qwen3.5 上挂 LoRA 微调，把它做成一个决策模型：给一段上下文和若干道题，它不生成文字，只给每个候选打出概率。推理和训练共用同一次前向：编译 prompt，读最后一个位置上候选字母的 logits。</p>
+    <div class="parts-nav">
+      <div><b>第一部分 · 推理</b>一段客服留言怎样变成三道题的概率：拆题、编译 prompt、读字母 logits、带温度的 softmax、按题型组装答案。</div>
+      <div><b>第二部分 · 训练</b>一条软标签样本怎样改变模型：分布交叉熵、只更新 LoRA、2B 加的 RLCD 项、学习率调度、选模与温度校准。</div>
+    </div>
+  </header>
+
+  <section id="infer" class="part" aria-label="推理流程">
+    <div class="sec-head"><span class="eyebrow">第一部分 · 推理</span><h2>模型如何把一段客服留言变成概率</h2></div>
+    <p>每道题模型只做一次前向计算，读出最后一个位置上候选字母 A、B、C… 的 logits，再做带温度的 softmax。下面用仓库自带的 <code>examples/request.json</code> 走一遍完整流程。</p>
+    <p class="note"><b>数值是示意。</b>以下 logits 为示意值，按 README 中的示意概率反推得到，不是模型的真实输出。流程和公式都与 <code>decision/schema.py</code>、<code>decision/model.py</code>、<code>decision/api.py</code> 中的代码一致。</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="n">1</div>
+        <div class="body">
+          <h3>收到请求：一段上下文，三道题</h3>
+<pre>{
+  "state": "客户留言：付款后一直没有收到发票，我已经催了三次，今天必须拿到。",
+  "questions": {
+    "urgent":      {"type": "noul",   "instructions": "客户是否表达了紧迫性？"},
+    "department":  {"type": "choice", "instructions": "应该由哪个部门处理？",
+                    "criteria": {"billing": "支付、发票及退款", "technical": "故障和系统问题", "sales": "购买咨询与升级"}},
+    "frustration": {"type": "score",  "instructions": "客户有多不满？",
+                    "criteria": ["平静", "不满", "非常愤怒"]}
+  }
+}</pre>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">2</div>
+        <div class="body">
+          <h3>拆题：每道题各编译成一个 prompt，各跑一次前向</h3>
+          <p><code>options_for</code> 把每种题型统一成“键 — 描述”的候选列表，候选按顺序编号成 A、B、C…</p>
+          <div class="fan">
+            <div><b>urgent · noul</b>固定两个候选：A = false（否），B = true（是）</div>
+            <div><b>department · choice</b>按字典顺序：A = billing，B = technical，C = sales</div>
+            <div><b>frustration · score</b>等级从低到高：A = 0 平静，B = 1 不满，C = 2 非常愤怒</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">3</div>
+        <div class="body">
+          <h3>编译 prompt：把候选写成字母列表，让模型“只返回字母”</h3>
+          <p><code>user_prompt</code> 拼出中文正文，再套上 Qwen 的聊天模板（<code>enable_thinking=False</code>）。灰色是模板部分，示意写法，具体以 tokenizer 输出为准。橙色框是模型要“回答”的位置，也就是读 logits 的地方。</p>
+          <pre id="prompt" aria-live="polite"></pre>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">4</div>
+        <div class="body">
+          <h3>一次前向，只取末位 26 个字母里的前 K 个</h3>
+          <p>模型对整个词表（约 25 万个 token）都会算出 logits，代码只取 A–Z 这 26 个字母 token 的值。超过候选数 K 的字母被填成 −10000，相当于不存在。这里没有采样，也没有生成，所以 <code>output_tokens</code> 为 0。</p>
+          <p><b>输入的末尾并没有 A、B、C。</b>候选列表里的字母只是编号，输入在助手回复刚开始的地方就截止了。读的是最后一个位置对“下一个 token”的预测，相当于问模型：如果让你接着写，第一个字会写 A、B 还是 C？</p>
+          <div class="seqwrap" aria-label="输入 token 序列的末尾">
+            <div class="seq">
+              <span class="seqgap">…</span>
+              <div class="tok"><span>C</span><small>候选编号</small></div>
+              <div class="tok"><span>: sales …</span></div>
+              <div class="tok"><span>只返回…字母。</span></div>
+              <div class="tok tmpl"><span>&lt;|im_end|&gt;</span></div>
+              <div class="tok tmpl"><span>&lt;|im_start|&gt;</span></div>
+              <div class="tok tmpl"><span>assistant</span></div>
+              <div class="tok tmpl"><span>&lt;think&gt;</span></div>
+              <div class="tok tmpl"><span>&lt;/think&gt;</span></div>
+              <div class="tok tmpl last"><span>\n\n</span><small>最后一个位置<br>在这里读 logits</small></div>
+              <div class="tok ghost"><span> A </span><small>答案不在输入里</small></div>
+            </div>
+          </div>
+          <p class="note">token 切分是示意，相邻的几个 token 合并显示了。</p>
+          <div class="readout">
+            <div>
+              <b>最后一个位置的输出：下一个 token 的分数表</b>
+              <div class="vocab">
+                <div><span>"A"</span><i style="width:85%"></i><span>保留</span></div>
+                <div><span>"B"</span><i style="width:66%"></i><span>保留</span></div>
+                <div><span>"C"</span><i style="width:62%"></i><span>保留</span></div>
+                <div class="drop"><span>"D"…"Z"</span><i style="width:40%"></i><span>屏蔽</span></div>
+                <div class="drop"><span>"的" "好"…</span><i style="width:55%"></i><span>丢弃</span></div>
+              </div>
+              <p style="font-size:12px;color:var(--muted)">词表约 25 万项，只留下 K 个候选字母，再在它们之间做 softmax。</p>
+            </div>
+            <div>
+              <b>和普通 SFT 微调的区别</b>
+              <div class="scroll"><table>
+                <thead><tr><th></th><th>普通 SFT</th><th>本项目</th></tr></thead>
+                <tbody>
+                  <tr><td>输入</td><td>prompt + 答案 "C"</td><td>只有 prompt</td></tr>
+                  <tr><td>读哪个位置</td><td>答案前一个位置</td><td>prompt 最后一个位置</td></tr>
+                  <tr><td>和谁比</td><td>整个词表</td><td>只比 K 个字母</td></tr>
+                  <tr><td>训练目标</td><td>one-hot</td><td>可以是软标签分布</td></tr>
+                </tbody>
+              </table></div>
+              <p style="font-size:12px;color:var(--muted)">两者看的是同一个预测。本项目省掉拼接答案这一步，训练和推理的输入完全一样，见 <code>decision/data.py:142</code>。</p>
+            </div>
+          </div>
+          <p><b>全词表的 logits 算了，但只用了字母那几项。</b>要分开看算了什么和用了什么：</p>
+          <div class="readout">
+            <div>
+              <b>算了什么</b>
+              <p style="font-size:13px">主干网络把所有位置过完所有层，得到每个位置的隐藏向量 h，这一段占了绝大部分计算量。输出层 <code>lm_head</code> 只对最后一个位置做（<code>logits_to_keep=1</code>），算出全词表约 25 万项 logits，再按下标取出 A–Z 这 26 列。</p>
+              <pre style="font-size:12px">model(**inputs, logits_to_keep=1)
+  .logits[:, -1, letter_ids]</pre>
+            </div>
+            <div>
+              <b>用了什么</b>
+              <p style="font-size:13px">每个词的 logit 是独立算出来的点积，w<sub>A</sub> 是输出矩阵中 “A” 对应的那一行：</p>
+              <div class="formula">logit("A") = h · w<sub>A</sub>　logit("B") = h · w<sub>B</sub>　…</div>
+              <p style="font-size:13px">“A” 的分数和“的”“好”的分数无关，softmax 又只在 K 个候选之间做，所以其余分数算完就丢掉，完全不参与结果。只算这几个点积也能得到一模一样的结果，项目直接用框架的标准接口，是因为这一步的开销相对主干网络很小。</p>
+            </div>
+          </div>
+          <p class="note">真正决定结果的是最后一个位置的隐藏向量 h，以及 K 个字母在输出矩阵中的那几行。训练调整 LoRA，本质上就是在调整 h，让它和正确字母那一行的点积更大。GGUF 版本在 llama.cpp 里也是同样的做法。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">5</div>
+        <div class="body">
+          <h3>除以温度 T，只在 K 个候选内做 softmax，再按题型组装答案</h3>
+          <p>p<sub>i</sub> = exp(z<sub>i</sub>/T) / Σ exp(z<sub>j</sub>/T)。0.8B 的发布温度是 T = 1.108。温度只改变分布的尖锐程度，不改变哪个候选最大。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="infer-lab" class="lab" aria-label="推理交互演示">
+    <div>
+      <h2>动手试：推理第 4、5 步的实时计算</h2>
+      <p class="sub" style="margin-top:4px">选一道题，拖动候选 logits 或温度，观察概率和最终答案。</p>
+    </div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+
+    <div>
+      <h4>末位 logits：A–Z 字母 token（K 个可用，其余屏蔽）</h4>
+      <div class="letters" id="letters"></div>
+      <div class="legend">
+        <span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>候选字母</span>
+        <span><i style="background:var(--pick-soft);border:1px solid var(--pick)"></i>最大 logit</span>
+        <span><i style="background:var(--mask)"></i>屏蔽为 −10000</span>
+      </div>
+    </div>
+
+    <div class="controls" id="controls"></div>
+
+    <div>
+      <h4>softmax 计算过程</h4>
+      <div class="scroll"><table id="calc"></table></div>
+    </div>
+
+    <div>
+      <h4>候选概率</h4>
+      <div class="bars" id="bars"></div>
+    </div>
+
+    <div class="result">
+      <div>
+        <h4>该题返回的 answer</h4>
+        <pre id="json"></pre>
+      </div>
+      <div class="explain" id="explain"></div>
+    </div>
+  </section>
+
+  <section id="train" class="part" aria-label="训练流程">
+    <div class="sec-head"><span class="eyebrow">第二部分 · 训练</span><h2>一条带软标签的样本如何改变模型</h2></div>
+    <p>训练用的前向计算和推理完全相同：编译 prompt，读末位候选字母的 logits。区别在后面多了三件事：拿 logits 和标签分布算损失，把梯度只传给 LoRA 参数，以及定期在验证集上选出最好的 checkpoint。</p>
+    <p class="note"><b>样本和数值是示意。</b>下面这条样本是按 CJ-Dataset 的格式构造的，不是数据集里的原文。logits 是虚构的起点，“走一步”的演示把 logits 当成可以直接更新的参数，真实训练中梯度更新的是 LoRA 矩阵。损失、梯度和 RLCD 奖励的公式与 <code>scripts/train.py</code>、<code>decision/rlcd.py</code> 一致。</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="n">1</div>
+        <div class="body">
+          <h3>数据：1,304.8 万条决策，一条只有一道题</h3>
+          <p>CJ-Dataset 每行一个 case，包含上下文、一道题和标签。标签可以是硬标签（一个正确答案），也可以是概率分布，也就是软标签。四个领域混在一起训练一个模型，每条样本在 1 个 epoch 里只出现一次。</p>
+          <div class="mix" id="mix"></div>
+          <p class="sub">法律和金融各只有 2.4 万条，不到总量的 0.2%。这也是这两个领域准确率最低、训练中提升最多的原因之一。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">2</div>
+        <div class="body">
+          <h3>一条样本：留言本身有歧义，所以标签是分布</h3>
+<pre>{
+  "state": "客户留言：上个月续费被扣了两次钱，客服说是系统问题，到现在也没退。",
+  "questions": {"decision": {"type": "choice", "instructions": "应该由哪个部门处理？",
+    "criteria": {"billing": "支付、发票及退款", "technical": "故障和系统问题", "sales": "购买咨询与升级"}}},
+  "gold": {"decision": {"type": "choice",
+    "probabilities": {"billing": 0.70, "technical": 0.25, "sales": 0.05}}}
+}</pre>
+          <p>退款归 billing，但客服说是“系统问题”，technical 也说得通。软标签把这种不确定性直接告诉模型：目标不是“100% billing”，而是“70% billing、25% technical”。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">3</div>
+        <div class="body">
+          <h3>编译 prompt：choice 题的候选顺序会被随机打乱</h3>
+          <p>训练时 <code>Example.render</code> 用随机数打乱 choice 的候选顺序，标签按同样的顺序重排。这样模型学不到“正确答案常在 A”。推理和评测时不打乱。假设这次打乱后的顺序如下：</p>
+          <pre id="train-prompt"></pre>
+          <p>标签向量随之变成 <code>y = [A: 0.25, B: 0.05, C: 0.70]</code>，正确答案的主体落在 C。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">4</div>
+        <div class="body">
+          <h3>前向：和推理一样读 A/B/C 的 logits，训练时不用温度</h3>
+          <p>训练中 T 固定为 1。温度是训练结束后才在独立验证划分上拟合的，它只做事后校准。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">5</div>
+        <div class="body">
+          <h3>损失：分布交叉熵，2B 再加一项 RLCD</h3>
+          <div class="formula">loss = −Σ y<sub>i</sub> · log softmax(z)<sub>i</sub>　　∂loss/∂z<sub>i</sub> = p<sub>i</sub> − y<sub>i</sub></div>
+          <p>硬标签只是 y 为 one-hot 的特例，代码里用的是同一个公式。梯度 p − y 的含义很直观：概率给多了的候选往下压，给少了的往上抬。下面的交叉熵实验可以一步步看到这个过程。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">6</div>
+        <div class="body">
+          <h3>反向传播：只更新 LoRA，原模型权重冻结</h3>
+          <div class="lora">
+            <span class="blk frozen">W（冻结）</span><span>+</span>
+            <span class="blk train">B · A</span><span>×</span>
+            <span class="blk">α / r = 64 / 32 = 2</span>
+          </div>
+          <p>每个线性投影层旁挂一对秩为 32 的矩阵 A、B，只有它们参与训练。B 初始化为 0，所以训练刚开始时模型的输出和原版 Qwen3.5 完全一样。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">7</div>
+        <div class="body">
+          <h3>攒够一个全局批次，再更新一次参数</h3>
+          <div class="pair">
+            <div><b>chinese-decision-0.8b</b>全局批次约 1,024 条<br>共 10,132 步<br>只用交叉熵</div>
+            <div><b>chinese-decision-2b</b>全局批次约 2,048 条，4 卡<br>共 4,994 步<br>交叉熵 + RLCD</div>
+          </div>
+          <p>梯度在多张卡和多个 micro-batch 上累积，然后裁剪到范数 1.0，再用 AdamW 更新。学习率前 100 步线性预热到 1e-4，之后按余弦衰减到 1e-5：</p>
+          <svg class="chart" id="lr" viewBox="0 0 640 170" role="img" aria-label="0.8B 训练学习率曲线"></svg>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">8</div>
+        <div class="body">
+          <h3>每 1,000 步验证一次，按分布 NLL 保留最好的 checkpoint</h3>
+          <p>验证集是官方验证集的分层子集：4 个领域 × 3 种题型 × 每组 100 条，共 1,200 条。选模看的是分布 NLL，不是准确率，因为 NLL 同时衡量选得对不对和概率给得准不准。测试集 CJ-Bench 不参与任何选择。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">9</div>
+        <div class="body">
+          <h3>收尾：合并 LoRA，拟合温度，验证导出结果</h3>
+          <p><code>scripts/finalize.py</code> 把 B·A 加回原权重，再检查合并前后探针样本的选择一致。然后在训练选模没用过的验证划分 0 上拟合温度 T（0.8B 为 1.108，2B 为 1.075），写进 <code>decision_config.json</code>，也就是第一部分推理时用的那个 T。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="train-ce" class="lab" aria-label="交叉熵训练演示">
+    <div>
+      <h2>实验：交叉熵如何把预测拉向标签</h2>
+      <p class="sub">点“走一步”，按 z ← z − η·(p − y) 更新 logits，观察预测分布 p 怎样靠近标签 y。</p>
+    </div>
+    <div class="row">
+      <span class="sub">标签类型</span>
+      <div class="seg" role="group" aria-label="标签类型">
+        <button id="lab-soft" aria-pressed="true">软标签 0.25 / 0.05 / 0.70</button>
+        <button id="lab-hard" aria-pressed="false">硬标签 C = 1</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <label for="eta">每步步长 η</label>
+      <input type="range" id="eta" min="0.1" max="3" step="0.1" value="1">
+      <output id="eta-o">1.0</output>
+    </div>
+    <div class="row">
+      <button class="btn" id="step1">走一步</button>
+      <button class="btn ghost" id="step10">走 10 步</button>
+      <button class="btn ghost" id="reset">回到起点</button>
+      <label class="check"><input type="checkbox" id="use-rlcd"> 同时加上 RLCD 项（见下一个实验）</label>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><span>已走步数</span><strong id="s-step">0</strong></div>
+      <div class="stat"><span>交叉熵损失</span><strong id="s-loss">–</strong></div>
+      <div class="stat"><span>理论最低损失 H(y)</span><strong id="s-min">–</strong></div>
+    </div>
+
+    <div>
+      <h4>预测 p 与标签 y</h4>
+      <div class="cmp" id="cmp"></div>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>模型预测 p</span>
+        <span><i style="background:var(--good)"></i>标签 y</span>
+      </div>
+    </div>
+
+    <div>
+      <h4>本步计算</h4>
+      <div class="scroll"><table id="ce-table"></table></div>
+    </div>
+
+    <div>
+      <h4>损失曲线</h4>
+      <svg class="chart" id="loss-chart" viewBox="0 0 640 160" role="img" aria-label="交叉熵损失随步数变化"></svg>
+    </div>
+  </section>
+
+  <section id="train-rlcd" class="lab" aria-label="RLCD 演示">
+    <div>
+      <h2>实验：RLCD 在当前 logits 周围试探 4 个方向</h2>
+      <p class="sub">只有 2B 用了这一项。它给当前 logits 加 4 组均值为 0 的高斯噪声，用适当评分规则给每组打分，比组内平均分高的方向就往那边推。</p>
+    </div>
+    <div class="ctl">
+      <label for="sigma">噪声尺度 σ</label>
+      <input type="range" id="sigma" min="0.1" max="0.4" step="0.01" value="0.4">
+      <output id="sigma-o">0.40</output>
+    </div>
+    <p class="sub">训练中 σ 随样本进度从 0.4 线性降到 0.1：前期试探得远，后期试探得近。</p>
+    <div class="row"><button class="btn ghost" id="resample">重新采样噪声</button></div>
+    <div class="scroll"><table id="rl-table"></table></div>
+    <div class="formula" id="rl-formula"></div>
+    <p class="sub">奖励 = Σ y·log q（下限 −9.21）+ 0.75 × 球面得分 y·q / ‖q‖；score 题还要减去 RPS，让离真实等级越远的错误扣分越多。优势 = (奖励 − 组内平均) / 标准差。</p>
+  </section>
+
+  <section id="facts" class="facts">
+    <h2>几个要点</h2>
+    <h3>推理</h3>
+    <ul>
+      <li><b>为什么用字母，不直接用“billing”这样的词？</b>字母都是单个 token，一次前向就能比较所有候选。候选描述可以任意长，也不会影响打分方式。</li>
+      <li><b>softmax 只在候选内做。</b>模型给“A”的原始概率在整个词表里可能并不高，但只要它比 B、C 高，归一化后就是首选。</li>
+      <li><b>三道题互相独立。</b>同一段上下文会被编码三次，每次 prompt 只有问题和候选不同。题越多，前向次数越多。</li>
+      <li><b>训练时 choice 会打乱候选顺序，推理时不会。</b>打乱是为了防止模型记住“正确答案常在 A”，推理时按请求里的顺序编号。</li>
+      <li><b>GGUF 版本走同一条路。</b>llama.cpp 跑完前向后，同样只取末位的字母 logits，后续计算完全相同。</li>
+      <li><b>confidence 只反映分布有多尖锐。</b>它用 (K·p<sub>max</sub> − 1)/(K − 1) 计算，均匀分布为 0，完全确定为 1，不等于实际准确率。</li>
+    </ul>
+    <h3>训练</h3>
+    <ul>
+      <li><b>软标签的损失降不到 0。</b>最低只能降到标签自身的熵 H(y)，此时 p 正好等于 y。模型因此学会在有歧义的题上给出 70% 而不是 99%，这是 ECE 能做到很低的原因之一。</li>
+      <li><b>梯度只有 p − y 这一个来源。</b>它从 26 个字母里的 K 个 logits 出发，经过整个网络反传，最后只落在 LoRA 的 A、B 上。</li>
+      <li><b>RLCD 和交叉熵方向大体一致，但更关注整体分布的形状。</b>球面得分和 RPS 会额外奖励“错得近”的分布，对有序的 score 题尤其明显。0.8B 没用这一项，所以两个尺寸的差异不能只归因于模型大小。</li>
+      <li><b>步数不代表进度。</b>批次大小随 token 预算动态变化，项目里统一按已训练样本数计算进度。</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+// 推理演示
+(() => {
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const STATE = "客户留言：付款后一直没有收到发票，我已经催了三次，今天必须拿到。";
+const RELEASE_T = 1.108;
+// Illustrative logits, back-solved so softmax(z / 1.108) matches README's illustrative probabilities.
+const QUESTIONS = [
+  { name: "urgent", kind: "noul", instructions: "客户是否表达了紧迫性？",
+    options: [["false", "否"], ["true", "是"]], logits: [14.2, 17.72] },
+  { name: "department", kind: "choice", instructions: "应该由哪个部门处理？",
+    options: [["billing", "支付、发票及退款"], ["technical", "故障和系统问题"], ["sales", "购买咨询与升级"]],
+    logits: [18.6, 14.3, 13.53] },
+  { name: "frustration", kind: "score", instructions: "客户有多不满？",
+    options: [["0", "平静"], ["1", "不满"], ["2", "非常愤怒"]], logits: [12.1, 15.36, 15.87] },
+];
+QUESTIONS.forEach(q => q.initial = q.logits.slice());
+
+let current = 0;
+let temperature = RELEASE_T;
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (x, d = 4) => Number(x).toFixed(d);
+
+function softmax(z, t) {
+  const v = z.map(x => x / t);
+  const m = Math.max(...v);
+  const w = v.map(x => Math.exp(x - m));
+  const s = w.reduce((a, b) => a + b, 0);
+  return { scaled: v, weights: w, probs: w.map(x => x / s) };
+}
+
+function renderTabs() {
+  document.getElementById("tabs").innerHTML = QUESTIONS.map((q, i) =>
+    `<button role="tab" id="tab-${q.name}" aria-selected="${i === current}" data-i="${i}">${q.name} · ${q.kind}</button>`).join("");
+}
+
+function renderPrompt(q) {
+  const cands = q.options.map(([k, v], i) => `<span class="cand">${LETTERS[i]}: ${esc(k)} — ${esc(v)}</span>`).join("\n");
+  document.getElementById("prompt").innerHTML =
+    `<span class="tpl">&lt;|im_start|&gt;user</span>\n` +
+    `待判断的上下文：\n${esc(STATE)}\n\n问题：\n${esc(q.instructions)}\n\n候选项：\n${cands}\n只返回候选项对应的字母。` +
+    `<span class="tpl">&lt;|im_end|&gt;\n&lt;|im_start|&gt;assistant\n&lt;think&gt;\n\n&lt;/think&gt;\n\n</span><span class="slot">？← 在这里读 A/B/C 的 logits</span>`;
+}
+
+function renderControls(q) {
+  const rows = q.options.map(([k, v], i) => `
+    <div class="ctl">
+      <label for="z-${i}">z<sub>${LETTERS[i]}</sub>（${esc(k)}）</label>
+      <input type="range" id="z-${i}" data-i="${i}" min="5" max="25" step="0.01" value="${q.logits[i]}">
+      <output id="zo-${i}">${fmt(q.logits[i], 2)}</output>
+    </div>`).join("");
+  document.getElementById("controls").innerHTML = rows + `
+    <div class="ctl temp">
+      <label for="temp">温度 T</label>
+      <input type="range" id="temp" min="0.3" max="4" step="0.001" value="${temperature}">
+      <output id="tempo">${fmt(temperature, 3)}</output>
+    </div>
+    <div class="presets">
+      <button class="preset" data-t="1">T = 1（不校准）</button>
+      <button class="preset" data-t="${RELEASE_T}">T = 1.108（0.8B 发布温度）</button>
+      <button class="preset" data-reset="1">恢复示例 logits</button>
+    </div>`;
+}
+
+function compute() {
+  const q = QUESTIONS[current];
+  const K = q.options.length;
+  const { scaled, weights, probs } = softmax(q.logits, temperature);
+  const best = probs.indexOf(Math.max(...probs));
+
+  document.getElementById("letters").innerHTML = [...LETTERS].map((L, i) => i < K
+    ? `<div class="on${i === best ? " top" : ""}">${L}<small>${fmt(q.logits[i], 2)}</small></div>`
+    : `<div class="off">${L}<small>−1e4</small></div>`).join("");
+
+  document.getElementById("calc").innerHTML =
+    `<thead><tr><th>候选</th><th>z（logit）</th><th>z / T</th><th>exp(z/T − max)</th><th>p</th></tr></thead><tbody>` +
+    q.options.map(([k], i) => `<tr class="${i === best ? "top" : ""}"><td>${LETTERS[i]} · ${esc(k)}</td>` +
+      `<td class="mono">${fmt(q.logits[i], 2)}</td><td class="mono">${fmt(scaled[i], 3)}</td>` +
+      `<td class="mono">${fmt(weights[i], 4)}</td><td class="mono">${fmt(probs[i], 4)}</td></tr>`).join("") +
+    `</tbody>`;
+
+  document.getElementById("bars").innerHTML = q.options.map(([k, v], i) => `
+    <div class="bar${i === best ? " top" : ""}">
+      <span>${LETTERS[i]} · ${esc(k)} <span style="color:var(--muted)">${esc(v)}</span></span>
+      <div class="track"><div class="fill" style="width:${(probs[i] * 100).toFixed(2)}%"></div></div>
+      <output>${(probs[i] * 100).toFixed(1)}%</output>
+    </div>`).join("");
+
+  const confidence = (K * probs[best] - 1) / (K - 1);
+  const answer = { type: q.kind, probabilities: {}, confidence: +confidence.toFixed(4) };
+  q.options.forEach(([k], i) => answer.probabilities[k] = +probs[i].toFixed(4));
+  let explain;
+  if (q.kind === "noul") {
+    answer.noul = +probs[1].toFixed(4);
+    explain = `<p><b>noul</b> 字段就是 B（true）的概率，不做 0.5 阈值判断，阈值由调用方决定。</p>
+      <div class="formula">noul = p(true) = ${fmt(probs[1])}</div>`;
+  } else if (q.kind === "choice") {
+    answer.choice = q.options[best][0];
+    explain = `<p><b>choice</b> 字段是概率最大的候选键。</p>
+      <div class="formula">choice = argmax p = "${esc(q.options[best][0])}"</div>`;
+  } else {
+    const score = probs.reduce((s, p, i) => s + i * p, 0);
+    answer.score = +score.toFixed(4);
+    answer.legend = Object.fromEntries(q.options);
+    explain = `<p><b>score</b> 字段不是 argmax，而是按概率加权的期望等级（0 到 K−1），所以可以是小数。</p>
+      <div class="formula">score = Σ i·p<sub>i</sub> = ${probs.map((p, i) => `${i}×${fmt(p, 3)}`).join(" + ")} = ${fmt(score, 3)}</div>
+      <p>最可能的单个等级是 ${esc(q.options[best][1])}，但期望值落在 ${fmt(score, 2)}，表示“不满”和“非常愤怒”之间。</p>`;
+  }
+  explain += `<p><b>confidence</b> 衡量分布有多尖锐，不等于准确率。</p>
+    <div class="formula">(K·p<sub>max</sub> − 1)/(K − 1) = (${K}×${fmt(probs[best], 3)} − 1)/${K - 1} = ${fmt(confidence, 3)}</div>`;
+
+  document.getElementById("json").textContent = JSON.stringify(answer, null, 2);
+  document.getElementById("explain").innerHTML = explain;
+}
+
+function selectQuestion(i) {
+  current = i;
+  const q = QUESTIONS[i];
+  renderTabs();
+  renderPrompt(q);
+  renderControls(q);
+  compute();
+}
+
+document.getElementById("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-i]");
+  if (b) selectQuestion(+b.dataset.i);
+});
+document.getElementById("controls").addEventListener("input", e => {
+  const q = QUESTIONS[current];
+  if (e.target.id === "temp") {
+    temperature = +e.target.value;
+    document.getElementById("tempo").textContent = fmt(temperature, 3);
+  } else if (e.target.dataset.i !== undefined) {
+    const i = +e.target.dataset.i;
+    q.logits[i] = +e.target.value;
+    document.getElementById(`zo-${i}`).textContent = fmt(q.logits[i], 2);
+  }
+  compute();
+});
+document.getElementById("controls").addEventListener("click", e => {
+  const b = e.target.closest(".preset");
+  if (!b) return;
+  if (b.dataset.reset) QUESTIONS[current].logits = QUESTIONS[current].initial.slice();
+  else temperature = +b.dataset.t;
+  renderControls(QUESTIONS[current]);
+  compute();
+});
+
+selectQuestion(0);
+})();
+</script>
+
+<script>
+// 训练演示
+(() => {
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+// Shuffled order used in the walkthrough: A = technical, B = sales, C = billing.
+const OPTIONS = [["technical", "故障和系统问题"], ["sales", "购买咨询与升级"], ["billing", "支付、发票及退款"]];
+const LABELS = { soft: [0.25, 0.05, 0.70], hard: [0, 0, 1] };
+const START = [1.3, 0.6, 1.0]; // illustrative early-training logits: the model leans the wrong way
+const MIX = [["通用", 10000000], ["医疗", 3000000], ["法律", 24000], ["金融", 24000]];
+
+const fmt = (x, d = 3) => Number(x).toFixed(d);
+const sum = a => a.reduce((s, x) => s + x, 0);
+const softmax = z => { const m = Math.max(...z); const w = z.map(x => Math.exp(x - m)); const s = sum(w); return w.map(x => x / s); };
+const entropy = y => -sum(y.map(v => v > 0 ? v * Math.log(v) : 0));
+const ce = (z, y) => { const p = softmax(z); return -sum(y.map((v, i) => v * Math.log(p[i]))); };
+
+// Data mix bars (log-free, proportional to decisions)
+const total = sum(MIX.map(m => m[1]));
+document.getElementById("mix").innerHTML = MIX.map(([name, n]) => `
+  <div class="mixrow"><span>${name}</span>
+    <div class="track"><div class="fill" style="width:${(n / total * 100).toFixed(3)}%"></div></div>
+    <output>${n.toLocaleString("en-US")}</output></div>`).join("");
+
+// Prompt
+document.getElementById("train-prompt").innerHTML =
+  `<span class="tpl">&lt;|im_start|&gt;user</span>\n待判断的上下文：\n客户留言：上个月续费被扣了两次钱，客服说是系统问题，到现在也没退。\n\n问题：\n应该由哪个部门处理？\n\n候选项：\n` +
+  OPTIONS.map(([k, v], i) => `<span class="cand">${LETTERS[i]}: ${k} — ${v}</span>`).join("\n") +
+  `\n只返回候选项对应的字母。<span class="tpl">&lt;|im_end|&gt;\n&lt;|im_start|&gt;assistant\n&lt;think&gt;\n\n&lt;/think&gt;\n\n</span><span class="slot">？← 读 A/B/C 的 logits</span>`;
+
+// Learning-rate schedule from scripts/train.py, plotted over the 0.8B run's 10,132 steps.
+(function drawLR() {
+  const svg = document.getElementById("lr"), W = 640, H = 170, L = 52, R = 14, T = 12, B = 30, N = 10132;
+  const x = s => L + (W - L - R) * s / N, y = v => T + (H - T - B) * (1 - v / 1e-4);
+  let d = "";
+  for (let s = 0; s <= N; s += 20) {
+    const v = 1e-4 * Math.min(1, (s + 1) / 100) * (0.1 + 0.45 * (1 + Math.cos(Math.PI * Math.min(s / N, 1))));
+    d += (s ? "L" : "M") + x(s).toFixed(1) + "," + y(v).toFixed(1);
+  }
+  const grid = [0, 5e-5, 1e-4].map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>
+    <text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v === 0 ? "0" : v === 1e-4 ? "1e-4" : "5e-5"}</text>`).join("");
+  const xt = [0, 2500, 5000, 7500, 10132].map(s => `<text x="${x(s)}" y="${H - 10}" text-anchor="middle">${s}</text>`).join("");
+  svg.innerHTML = grid + xt +
+    `<path d="${d} L${x(N)},${y(0)} L${x(0)},${y(0)} Z" fill="var(--accent-soft)" stroke="none"/>` +
+    `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"/>` +
+    `<circle cx="${x(N)}" cy="${y(1e-5)}" r="3.5" fill="var(--accent)"/>` +
+    `<text x="${x(N) - 6}" y="${y(1e-5) - 8}" text-anchor="end">结束 1e-5</text>` +
+    `<text x="${x(100) + 6}" y="${y(1e-4) + 14}">预热 100 步后到峰值</text>`;
+})();
+
+// Seeded RNG so the RLCD table is stable until resampled.
+let seed = 7;
+function rand() { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
+function gauss() { let u = 0; while (!u) u = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand()); }
+
+const G = 4;
+let labelKind = "soft", z = START.slice(), steps = 0, history = [], sigma = 0.4, noise = [];
+
+function sampleNoise() {
+  noise = Array.from({ length: G }, () => {
+    const e = z.map(() => gauss() * sigma);
+    const mean = sum(e) / e.length;
+    return e.map(v => v - mean); // zero-mean over the valid options, as in rlcd_loss
+  });
+}
+
+// decision/rlcd.py: log score (floored) + 0.75 * spherical; choice question, so no RPS term.
+function reward(q, y) {
+  const logq = q.map(v => Math.max(Math.log(Math.max(v, 1e-12)), -9.21));
+  const norm = Math.sqrt(sum(q.map(v => v * v)));
+  return sum(y.map((v, i) => v * logq[i])) + 0.75 * sum(y.map((v, i) => v * q[i])) / Math.max(norm, 1e-9);
+}
+
+function rlcd(zNow, y) {
+  const rows = noise.map(e => { const q = softmax(zNow.map((v, i) => v + e[i])); return { e, q, r: reward(q, y) }; });
+  const mean = sum(rows.map(r => r.r)) / G;
+  const sd = Math.sqrt(sum(rows.map(r => (r.r - mean) ** 2)) / (G - 1)); // torch.std is unbiased
+  rows.forEach(r => r.adv = (r.r - mean) / (sd + 1e-6));
+  // loss = -mean(adv * logp), logp = -|z_g - z|^2 / (2σ²)  =>  ∂loss/∂z = -mean(adv * e) / σ²
+  const grad = zNow.map((_, i) => -sum(rows.map(r => r.adv * r.e[i])) / G / (sigma * sigma));
+  return { rows, mean, grad };
+}
+
+function renderCE() {
+  const y = LABELS[labelKind], p = softmax(z), loss = ce(z, y);
+  document.getElementById("s-step").textContent = steps;
+  document.getElementById("s-loss").textContent = fmt(loss, 4);
+  document.getElementById("s-min").textContent = fmt(entropy(y), 4);
+
+  document.getElementById("cmp").innerHTML = OPTIONS.map(([k], i) => `
+    <div class="cmprow"><span>${LETTERS[i]} · ${k}</span>
+      <div class="dual">
+        <div class="p"><div class="track"><div class="fill" style="width:${(p[i] * 100).toFixed(2)}%"></div></div></div>
+        <div class="y"><div class="track"><div class="fill" style="width:${(y[i] * 100).toFixed(2)}%"></div></div></div>
+        <div class="lbl"><span>p = ${fmt(p[i])}</span><span>y = ${fmt(y[i], 2)}</span></div>
+      </div></div>`).join("");
+
+  const g = p.map((v, i) => v - y[i]);
+  document.getElementById("ce-table").innerHTML =
+    `<thead><tr><th>候选</th><th>logit z</th><th>p = softmax(z)</th><th>标签 y</th><th>梯度 p − y</th><th>更新方向</th></tr></thead><tbody>` +
+    OPTIONS.map(([k], i) => `<tr><td>${LETTERS[i]} · ${k}</td><td class="mono">${fmt(z[i])}</td><td class="mono">${fmt(p[i])}</td>` +
+      `<td class="mono">${fmt(y[i], 2)}</td><td class="mono ${g[i] > 0 ? "neg" : "pos"}">${g[i] >= 0 ? "+" : ""}${fmt(g[i])}</td>` +
+      `<td>${Math.abs(g[i]) < 5e-4 ? "已对齐" : g[i] > 0 ? "压低 ↓" : "抬高 ↑"}</td></tr>`).join("") + `</tbody>`;
+
+  drawLoss(entropy(y));
+}
+
+function drawLoss(floor) {
+  const svg = document.getElementById("loss-chart"), W = 640, H = 160, L = 46, R = 14, T = 10, B = 26;
+  const pts = history.length ? history : [ce(z, LABELS[labelKind])];
+  const maxS = Math.max(10, pts.length - 1), maxV = Math.max(...pts, floor) * 1.1 || 1;
+  const x = s => L + (W - L - R) * s / maxS, y = v => T + (H - T - B) * (1 - v / maxV);
+  const d = pts.map((v, s) => (s ? "L" : "M") + x(s).toFixed(1) + "," + y(v).toFixed(1)).join("");
+  const last = pts.length - 1;
+  svg.innerHTML =
+    `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>` +
+    `<text x="${L - 6}" y="${y(0) + 4}" text-anchor="end">0</text>` +
+    `<text x="${L - 6}" y="${y(maxV / 1.1) + 4}" text-anchor="end">${fmt(maxV / 1.1, 2)}</text>` +
+    (floor > 0 ? `<line x1="${L}" x2="${W - R}" y1="${y(floor)}" y2="${y(floor)}" stroke="var(--good)" stroke-dasharray="4 4"/>
+      <text x="${W - R}" y="${y(floor) - 6}" text-anchor="end" style="fill:var(--good)">最低 H(y) = ${fmt(floor, 3)}</text>` : "") +
+    `<text x="${L}" y="${H - 6}">0</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${maxS} 步</text>` +
+    `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"/>` +
+    `<circle cx="${x(last)}" cy="${y(pts[last])}" r="3.5" fill="var(--accent)"/>`;
+}
+
+function renderRL() {
+  const y = LABELS[labelKind], { rows, mean, grad } = rlcd(z, y);
+  document.getElementById("rl-table").innerHTML =
+    `<thead><tr><th>试探</th><th>噪声 ε（A, B, C）</th><th>扰动后 q</th><th>奖励</th><th>优势</th></tr></thead><tbody>` +
+    `<tr><td>当前</td><td class="mono">0, 0, 0</td><td class="mono">${softmax(z).map(v => fmt(v)).join(", ")}</td><td class="mono">${fmt(reward(softmax(z), y))}</td><td>–</td></tr>` +
+    rows.map((r, g) => `<tr><td>#${g + 1}</td><td class="mono">${r.e.map(v => (v >= 0 ? "+" : "") + fmt(v, 2)).join(", ")}</td>` +
+      `<td class="mono">${r.q.map(v => fmt(v)).join(", ")}</td><td class="mono">${fmt(r.r)}</td>` +
+      `<td class="mono ${r.adv > 0 ? "pos" : "neg"}">${r.adv >= 0 ? "+" : ""}${fmt(r.adv, 2)}</td></tr>`).join("") + `</tbody>`;
+  const ceg = softmax(z).map((v, i) => v - y[i]);
+  document.getElementById("rl-formula").innerHTML =
+    `组内平均奖励 ${fmt(mean)}<br>RLCD 梯度 ∂/∂z = −mean(优势 × ε) / σ² = [${grad.map(v => fmt(v)).join(", ")}]<br>` +
+    `交叉熵梯度 p − y　　　　　　　　 = [${ceg.map(v => fmt(v)).join(", ")}]`;
+}
+
+function step(n) {
+  const eta = +document.getElementById("eta").value, y = LABELS[labelKind];
+  const useRL = document.getElementById("use-rlcd").checked;
+  if (!history.length) history.push(ce(z, y));
+  for (let k = 0; k < n; k++) {
+    const p = softmax(z);
+    let g = p.map((v, i) => v - y[i]);
+    if (useRL) {
+      sampleNoise();
+      const r = rlcd(z, y).grad;
+      g = g.map((v, i) => v + r[i]);
+    }
+    z = z.map((v, i) => v - eta * g[i]);
+    steps++;
+    history.push(ce(z, y));
+  }
+  renderCE();
+  renderRL();
+}
+
+function reset() { z = START.slice(); steps = 0; history = []; renderCE(); renderRL(); }
+
+function setLabel(kind) {
+  labelKind = kind;
+  document.getElementById("lab-soft").setAttribute("aria-pressed", kind === "soft");
+  document.getElementById("lab-hard").setAttribute("aria-pressed", kind === "hard");
+  reset();
+}
+
+document.getElementById("lab-soft").addEventListener("click", () => setLabel("soft"));
+document.getElementById("lab-hard").addEventListener("click", () => setLabel("hard"));
+document.getElementById("step1").addEventListener("click", () => step(1));
+document.getElementById("step10").addEventListener("click", () => step(10));
+document.getElementById("reset").addEventListener("click", reset);
+document.getElementById("eta").addEventListener("input", e => document.getElementById("eta-o").textContent = fmt(e.target.value, 1));
+document.getElementById("sigma").addEventListener("input", e => {
+  sigma = +e.target.value;
+  document.getElementById("sigma-o").textContent = fmt(sigma, 2);
+  sampleNoise(); renderRL();
+});
+document.getElementById("resample").addEventListener("click", () => { sampleNoise(); renderRL(); });
+
+sampleNoise();
+renderCE();
+renderRL();
+})();
+</script>
+</body>
+</html>
