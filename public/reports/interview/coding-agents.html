@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- 搜索结果跳到知识库里带侧栏的条目页,而不是这份裸 HTML -->
+<meta data-pagefind-meta="url[content]" content="/interview/agent/coding-agents/">
+<meta name="description" content="Coding Agent 八股:Pi、Codex、Claude Code 的区别。共同的 agent loop 与 harness,循环细节(完整历史与缓存前缀、并行工具调用、插话队列、压缩时机、结束条件),默认工具、指令文件、模型支持的对比;Pi 的最小内核与容器隔离、Codex 的系统沙箱与审批策略、Claude Code 的权限规则与 auto 模式;MCP 的延迟加载与 codemode、skills、hooks、子 agent、上下文压缩。">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>Pi、Codex、Claude Code：三种 Coding Agent 的设计取舍</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@600;900&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous">
+<style>
+/* Coding agent 页：上下文开销条形图，工具定义蓝色、调用结果青色 */
+.cbars{display:grid;grid-template-columns:76px minmax(0,1fr) 56px;gap:8px 12px;align-items:center}
+.cname{font-size:13.5px;font-weight:600}
+.ctrack{height:18px;background:var(--norm-bg);border-radius:3px;display:flex;overflow:hidden;min-width:0}
+.ctrack i{display:block;height:100%}
+.cdef{background:var(--seq)} .cres{background:var(--tok)}
+.cnum{font-family:var(--mono);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums}
+.cleg{display:flex;gap:16px;font-size:13px;color:var(--muted)}
+.cleg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+/* Layout: 与其他八股页同一套规格书式单栏长文；冻结权重灰色，A 蓝色、B 青色，合并后的权重橙色 */
+:root{
+  --bg:#EFF2F4; --surface:#FFFFFF; --surface-2:#F7F9FA;
+  --ink:#16212B; --muted:#5B6873; --line:#D3DAE0; --line-strong:#9AA6B0;
+  --seq:#2F5FD0; --seq-bg:#E3EBFB;
+  --tok:#0C8578; --tok-bg:#DBF1ED;
+  --pos:#2E7D32; --pos-bg:#E3F2E4;
+  --neg:#C2412D; --neg-bg:#FBE7E3;
+  --warn:#B0731A; --warn-bg:#F7EBD6;
+  --norm-bg:#EAEEF1;
+  --display:"Noto Serif SC","Songti SC",serif;
+  --sans:-apple-system,"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --seq:#86A7F4; --seq-bg:#1C2A47;
+  --tok:#4CC6B6; --tok-bg:#11332F;
+  --pos:#6FCF7A; --pos-bg:#16301A;
+  --neg:#FF8A73; --neg-bg:#3B1E18;
+  --warn:#E2A851; --warn-bg:#382A13;
+  --norm-bg:#212C37;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --seq:#86A7F4; --seq-bg:#1C2A47;
+  --tok:#4CC6B6; --tok-bg:#11332F;
+  --pos:#6FCF7A; --pos-bg:#16301A;
+  --neg:#FF8A73; --neg-bg:#3B1E18;
+  --warn:#E2A851; --warn-bg:#382A13;
+  --norm-bg:#212C37;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.75}
+.wrap{max-width:1040px;margin:0 auto;padding-block:40px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:56px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.3}
+h1{font-size:clamp(28px,5vw,44px);font-weight:900;letter-spacing:.01em}
+h2{font-size:clamp(22px,3.2vw,28px);font-weight:900}
+h3{font-size:19px;font-weight:600}
+p{margin:0;max-width:68ch}
+code,.mono{font-family:var(--mono);font-size:.9em}
+a{color:var(--seq)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--seq);outline-offset:3px;border-radius:4px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.stack{display:flex;flex-direction:column;gap:16px}
+.sec-head{display:flex;flex-direction:column;gap:6px;border-top:2px solid var(--ink);padding-top:14px}
+
+header{display:flex;flex-direction:column;gap:18px}
+.lede{font-size:17px;color:var(--muted);max-width:60ch}
+.toc{display:flex;flex-wrap:wrap;gap:8px}
+.toc a{font-size:13.5px;text-decoration:none;color:var(--ink);border:1px solid var(--line);background:var(--surface);padding:4px 12px;border-radius:999px}
+.toc a:hover{border-color:var(--ink)}
+
+.recite{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--ink);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.recite p{max-width:none}
+.recite .tag{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.08em}
+mark{background:var(--warn-bg);color:inherit;padding:0 3px;border-radius:3px}
+
+figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.scroll{overflow-x:auto}
+.dg{display:block;width:100%;min-width:760px;height:auto}
+figcaption{font-size:13.5px;color:var(--muted)}
+.dg text{fill:var(--ink);font-family:var(--sans);font-size:12.5px}
+.dg .c{text-anchor:middle;dominant-baseline:central}
+.dg .s{font-size:11.5px;fill:var(--muted)}
+.dg .h{font-weight:700;font-size:13.5px}
+.dg .m{font-family:var(--mono);font-size:11.5px}
+.dg rect{stroke-width:1.2}
+.b-io{fill:var(--surface);stroke:var(--ink)}
+.b-seq{fill:var(--seq-bg);stroke:var(--seq)}
+.b-tok{fill:var(--tok-bg);stroke:var(--tok)}
+.b-pos{fill:var(--pos-bg);stroke:var(--pos)}
+.b-neg{fill:var(--neg-bg);stroke:var(--neg)}
+.b-ref{fill:var(--warn-bg);stroke:var(--warn)}
+.panel{fill:var(--surface-2);stroke:var(--line)}
+.ln{stroke:var(--muted);stroke-width:1.3;fill:none}
+.arr{marker-end:url(#ah)}
+.ahp{fill:var(--muted)}
+.dg .pos{fill:var(--pos)}
+.dg .neg{fill:var(--neg)}
+
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.pt{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pt h3{font-family:var(--sans);font-size:15.5px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0}
+.pt p,.pt li{font-size:14.5px;line-height:1.7}
+.pt ul{margin:0;padding-left:1.2em}
+.chip{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;border:1px solid;letter-spacing:.03em}
+.chip.seq{color:var(--seq);border-color:var(--seq);background:var(--seq-bg)}
+.chip.tok{color:var(--tok);border-color:var(--tok);background:var(--tok-bg)}
+.chip.warn{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.note{font-size:14px;color:var(--muted);border:1px dashed var(--line-strong);border-radius:8px;padding:12px 14px}
+/* KaTeX 的 MathML 是绝对定位的，容器要定位才能把它裁在里面，否则手机上会横向溢出 */
+.scroll,.tbl,.tex-d,.fo,.katex{position:relative}
+.fo{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-family:var(--sans);font-size:12.5px;line-height:1.25;color:var(--ink)}
+.fo .katex{font-size:1.02em}
+.fo .fs,.fo.fs{font-size:11.5px;color:var(--muted)}
+.fo.fs .katex{color:var(--ink)}
+.b-norm2{fill:var(--norm-bg);stroke:var(--line-strong)}
+.b-shared{stroke-dasharray:5 3}
+.ln.share{stroke:var(--warn);stroke-dasharray:5 3}
+td.none{color:var(--muted)}
+.fld input[type=range]{width:240px;max-width:100%}
+.pbar{height:14px;background:var(--norm-bg);border-radius:3px;position:relative;min-width:120px}
+.pbar i{position:absolute;inset:0 auto 0 0;background:var(--tok);border-radius:3px}
+.dg .ring{fill:none;stroke:var(--line);stroke-width:1.2}
+.dg .hand{stroke:var(--seq);stroke-width:2}
+.dg .handdot{fill:var(--seq)}
+.dg .axis,.dg .grid{stroke:var(--line);stroke-width:1}
+.dg .vq{stroke:var(--seq);stroke-width:2.4}
+.dg .vk{stroke:var(--tok);stroke-width:2.4}
+.aqp{fill:var(--seq)} .akp{fill:var(--tok)}
+.dg .lq{fill:var(--seq)} .dg .lk{fill:var(--tok)}
+.dg .mvt{font-family:KaTeX_Math,serif;font-style:italic;font-size:16px;font-weight:600}
+.dg .ref1{stroke:var(--warn);stroke-width:1.5}
+.dg .ref2{stroke:var(--neg);stroke-width:1.5;stroke-dasharray:6 4}
+.dg .curve0{fill:none;stroke:var(--line-strong);stroke-width:2}
+.dg .curve{fill:none;stroke:var(--seq);stroke-width:2.2}
+.dg .oodp{fill:var(--neg)}
+.fld select{font:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+.fld .lbl{display:block}
+.dg .frame{fill:none;stroke:var(--line-strong);stroke-dasharray:5 4}
+.dg .sum{fill:var(--surface);stroke:var(--muted);stroke-width:1.3}
+.ln.res{stroke:var(--warn);stroke-dasharray:5 3}
+.hm{display:grid;grid-template-columns:28px repeat(6,minmax(0,1fr));gap:3px}
+.hc{font-family:var(--mono);font-size:11.5px;text-align:center;padding:8px 0;border-radius:3px;background:color-mix(in srgb,var(--seq) calc(var(--a,0)*100%),var(--surface-2));font-variant-numeric:tabular-nums}
+.hc.hdark{color:#fff}
+.hc.h0{background:none;color:var(--muted)}
+.hc.hmask{background:repeating-linear-gradient(45deg,var(--norm-bg) 0 4px,var(--surface) 4px 8px)}
+.mk,.mkloss{display:grid;grid-template-columns:48px repeat(8,minmax(0,1fr));gap:3px}
+.mkloss{margin-top:6px}
+.mc{font-size:11.5px;text-align:center;padding:7px 0;border-radius:3px;min-width:0;overflow:hidden;white-space:nowrap}
+.mc.m0{background:none;color:var(--ink);font-family:var(--sans)}
+.mc.mpad{color:var(--muted)}
+.mc.mok{background:var(--seq)}
+.mc.mno{background:repeating-linear-gradient(45deg,var(--norm-bg) 0 4px,var(--surface) 4px 8px)}
+.mc.mdeadrow{outline:1.5px solid var(--neg);outline-offset:-1.5px}
+.mc.mdead{color:var(--neg);font-weight:700}
+.mc.lon{background:var(--pos-bg);color:var(--pos);font-weight:600}
+.mc.loff{background:var(--neg-bg);color:var(--neg);font-family:var(--mono)}
+.mods{display:flex;flex-wrap:wrap;gap:6px 14px;font-family:var(--mono);font-size:12.5px}
+.mats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.hm16{display:grid;grid-template-columns:repeat(16,minmax(0,1fr));gap:1px;aspect-ratio:1;background:var(--line);border:1px solid var(--line)}
+.hm16 div{min-width:0}
+.cap{font-size:13px;color:var(--muted);text-align:center;margin:4px auto 0}
+.dg .svon{fill:var(--seq)} .dg .svoff{fill:var(--line-strong);opacity:.5}
+.tex-d{overflow-x:auto;overflow-y:hidden}
+.tex-d .katex-display{margin:.3em 0}
+.katex{font-size:1.08em}
+.terms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.term{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.term .k{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.term p{font-size:14.5px}
+pre{margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.6;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto}
+pre .cm{color:var(--muted)}
+
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:680px;font-size:13.5px;line-height:1.55}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+thead th{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--muted);background:var(--surface-2)}
+tbody th{font-weight:700;white-space:nowrap}
+tr:last-child th,tr:last-child td{border-bottom:0}
+td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+td.cut{background:var(--warn-bg)}
+.posv{color:var(--pos);font-weight:600}
+.negv{color:var(--neg);font-weight:600}
+.flow{color:var(--pos)} .stop{color:var(--warn);font-weight:600}
+
+/* lab */
+.lab{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:16px}
+.lab h3{font-family:var(--sans);font-size:15.5px;font-weight:700}
+.row{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:flex-end}
+.fld{display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.fld input[type=number]{font:inherit;font-family:var(--mono);font-size:13px;width:84px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+input:focus-visible{outline:2px solid var(--seq);outline-offset:1px}
+.chk{display:flex;gap:6px;align-items:center;font-size:13.5px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button[aria-pressed=true]{border-color:var(--ink);background:var(--surface-2);font-weight:700}
+.toks{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.tk{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface-2);min-width:0}
+.tk .w{font-weight:700;font-size:14px}
+.tk .v{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tk input[type=range]{width:100%}
+.verdict{font-size:14px;border-left:3px solid var(--warn);padding:6px 12px;background:var(--warn-bg);border-radius:0 6px 6px 0}
+
+.qa{display:flex;flex-direction:column;gap:10px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 18px}
+summary{cursor:pointer;padding:14px 0;font-weight:700;font-size:15px;list-style:none;display:flex;gap:10px}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"+";font-family:var(--mono);color:var(--muted);width:14px;flex:none}
+details[open] summary::before{content:"−"}
+details .ans{padding:0 0 16px 24px;display:flex;flex-direction:column;gap:8px;font-size:14.5px}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;font-size:13px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);padding:5px 12px;border-radius:6px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button:focus-visible{outline:2px solid var(--seq);outline-offset:2px}
+
+ol.tpl{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:8px;max-width:72ch}
+ol.tpl b{font-weight:700}
+.src{font-size:13px;color:var(--muted)}
+.src ul{margin:6px 0 0;padding-left:1.2em}
+
+@media (max-width:760px){
+  .grid2,.terms{grid-template-columns:1fr}
+  .toks{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body data-pagefind-body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">大模型面试八股 · Agent 篇</div>
+  <h1>Pi、Codex、Claude Code：三种 Coding Agent 的设计取舍</h1>
+  <p class="lede">三者的骨架是同一个 agent loop：模型提出工具调用，harness 执行，再把结果交回模型。区别在 harness 上：循环细节怎么处理、上下文里放什么、默认给几个工具、安全边界由谁来划、怎么扩展。面试常问：它们有什么区别、为什么 Pi 只有四个工具、审批弹窗算不算安全、MCP 工具太多怎么办、长会话怎么压缩。</p>
+  <nav class="toc" aria-label="目录">
+    <a href="#recite">背诵版</a><a href="#loop">共同骨架</a><a href="#loopdiff">loop 的差别</a><a href="#table">总览对比</a><a href="#philosophy">设计哲学</a><a href="#safety">安全模型</a><a href="#context">上下文工程</a><a href="#ext">扩展机制</a><a href="#lab">动手试</a><a href="#code">手撕最小 agent</a><a href="#qa">高频追问</a><a href="#tpl">答题模板</a>
+  </nav>
+</header>
+
+<section id="recite" class="stack">
+  <div class="sec-head"><span class="eyebrow">先给结论</span><h2>30 秒背诵版</h2></div>
+  <div class="recite">
+    <span class="tag">同一个 agent loop，三种 harness 取舍：Pi 做减法，Codex 靠系统沙箱，Claude Code 开箱即用</span>
+    <p><b>Pi</b>：最小内核。默认只有 read、write、edit、bash 四个工具，系统提示词很短，不弹审批，也不内置子 agent 和计划模式；要什么功能自己写 TypeScript 扩展。支持多家模型，会话存成一棵可分叉的树。安全靠把整个进程放进容器。</p>
+    <p><b>Codex</b>：OpenAI 出品，Rust 写的，开源。把边界交给操作系统：sandbox mode 决定技术上能做什么，approval policy 决定什么时候停下来问。默认工作区内可写、不能联网，越界才请求批准。</p>
+    <p><b>Claude Code</b>：Anthropic 出品，功能最全：几十个内置工具、子 agent、skills、hooks、plugins。权限是“规则 + 模式”，规则按 deny、ask、allow 的顺序匹配；交互默认 auto 模式，由分类器代替人审查操作。Bash 沙箱可选，只管 shell 命令。</p>
+    <p><b>循环细节</b>：三者都支持一次多个工具调用、任务进行中插话（Pi 叫 steering 和 follow-up，Codex 叫 steer 和 queue）。Codex 不用服务端会话状态，每次发完整历史，靠前缀不变保住 prompt cache；Claude Code 的 Stop hook 可以否决“结束”，让它继续干。</p>
+    <p><b>趋势</b>：三家在互相借鉴，功能列表越来越像。回答时重点讲默认值和边界放在哪，不要只列谁有哪个功能。</p>
+  </div>
+</section>
+
+<section id="loop" class="stack">
+  <div class="sec-head"><span class="eyebrow">共同骨架</span><h2>共同的骨架：agent loop 与 harness</h2></div>
+  <p>Coding agent 的核心是一个循环：把上下文发给模型，模型返回文本或工具调用；有工具调用就执行，把结果追加到历史里，再发给模型；没有工具调用就结束这一轮。模型之外的部分叫 <b>harness</b>，三者的差别都在 harness 上。</p>
+  <figure>
+    <div class="scroll"><svg class="dg" viewBox="0 0 960 270" role="img" aria-label="agent loop 示意图：用户输入进入组装上下文，模型推理后判断有无工具调用，无则结束本轮，有则经过权限检查、执行工具、结果写回历史，再回到组装上下文；接近上限时压缩历史">
+      <rect class="b-io" x="20" y="50" width="120" height="60" rx="8"/>
+      <text class="c h" x="80" y="72">用户输入</text><text class="c s" x="80" y="92">或中途插话</text>
+      <rect class="b-tok" x="180" y="40" width="180" height="80" rx="8"/>
+      <text class="c h" x="270" y="62">组装上下文</text><text class="c s" x="270" y="84">system prompt + 指令文件</text><text class="c s" x="270" y="102">工具定义 + 历史消息</text>
+      <rect class="b-seq" x="400" y="50" width="130" height="60" rx="8"/>
+      <text class="c h" x="465" y="72">模型推理</text><text class="c s" x="465" y="92">流式输出文本或工具调用</text>
+      <rect class="b-io" x="570" y="50" width="140" height="60" rx="8"/>
+      <text class="c h" x="640" y="80">有工具调用？</text>
+      <rect class="b-io" x="760" y="50" width="180" height="60" rx="8"/>
+      <text class="c h" x="850" y="72">结束本轮</text><text class="c s" x="850" y="92">回复用户，等下一条输入</text>
+      <path class="ln arr" d="M140,80 H176"/><path class="ln arr" d="M360,80 H396"/><path class="ln arr" d="M530,80 H566"/><path class="ln arr" d="M710,80 H756"/>
+      <text class="c s" x="735" y="68">否</text>
+      <path class="ln arr" d="M640,110 V176"/><text class="c s" x="654" y="143">是</text>
+      <rect class="b-ref" x="570" y="180" width="140" height="70" rx="8"/>
+      <text class="c h" x="640" y="204">权限检查</text><text class="c s" x="640" y="228">规则、审批或分类器</text>
+      <rect class="b-tok" x="400" y="180" width="130" height="70" rx="8"/>
+      <text class="c h" x="465" y="204">执行工具</text><text class="c s" x="465" y="228">可能在沙箱里</text>
+      <rect class="b-tok" x="180" y="180" width="180" height="70" rx="8"/>
+      <text class="c h" x="270" y="204">结果写回历史</text><text class="c s" x="270" y="228">过长的输出截断或存文件</text>
+      <path class="ln arr" d="M570,215 H534"/><path class="ln arr" d="M400,215 H364"/><path class="ln arr" d="M270,180 V124"/>
+      <rect class="b-norm2" x="20" y="180" width="120" height="70" rx="8"/>
+      <text class="c h" x="80" y="204">压缩</text><text class="c s" x="80" y="228">接近窗口上限时</text>
+      <path class="ln arr" style="stroke-dasharray:5 4" d="M110,180 V146 H215 V124"/>
+      <text class="c s" x="162" y="162">摘要替换旧消息</text>
+    </svg></div>
+    <figcaption>除了“模型推理”，每个框都是 harness 的代码。三者的区别就是这些框的做法不同：上下文里放什么、权限怎么查、命令在哪里执行、历史怎么压缩。</figcaption>
+  </figure>
+  <p class="note" style="max-width:none">模型是被训练成会用这个循环的：后训练阶段大量用 shell、读写文件的轨迹做 RL，所以 harness 不需要教模型“怎么当 agent”，主要负责给工具、管上下文、管安全。这也是 Pi 敢把 harness 做得很小的前提。</p>
+</section>
+
+<section id="loopdiff" class="stack">
+  <div class="sec-head"><span class="eyebrow">细节</span><h2>agent loop 本身的差别</h2></div>
+  <p>骨架一样，细节不一样。追问一般落在五处：每次请求发什么、一条回复里有多个工具调用怎么执行、用户能不能中途插话、什么时候压缩、什么时候算结束。下图是一轮里这几件事发生的位置。</p>
+  <figure>
+    <div class="scroll"><svg class="dg" viewBox="0 0 960 200" role="img" aria-label="一轮 agent loop 的时间线：请求、模型回复多个工具调用、逐个权限检查、并发执行、批次结束时处理插话和压缩检查、下一次请求，直到回复不含工具调用时本轮结束">
+      <rect class="b-io" x="10" y="40" width="120" height="64" rx="8"/>
+      <text class="c h" x="70" y="62">请求</text><text class="c s" x="70" y="84">历史 + 工具定义</text>
+      <rect class="b-seq" x="150" y="40" width="140" height="64" rx="8"/>
+      <text class="c h" x="220" y="62">模型回复</text><text class="c s" x="220" y="84">文本 + 3 个工具调用</text>
+      <rect class="b-ref" x="310" y="40" width="120" height="64" rx="8"/>
+      <text class="c h" x="370" y="62">权限检查</text><text class="c s" x="370" y="84">逐个进行</text>
+      <rect class="b-tok" x="450" y="40" width="150" height="64" rx="8"/>
+      <text class="c h" x="525" y="56">执行</text>
+      <rect class="b-io" x="470" y="68" width="100" height="7" rx="2"/><rect class="b-io" x="470" y="78" width="70" height="7" rx="2"/><rect class="b-io" x="470" y="88" width="110" height="7" rx="2"/>
+      <rect class="b-norm2" x="620" y="40" width="140" height="64" rx="8"/>
+      <text class="c h" x="690" y="62">批次结束</text><text class="c s" x="690" y="84">读插话、检查压缩</text>
+      <rect class="b-io" x="780" y="40" width="170" height="64" rx="8"/>
+      <text class="c h" x="865" y="62">下一次请求</text><text class="c s" x="865" y="84">直到回复不含工具调用</text>
+      <path class="ln arr" d="M130,72 H146"/><path class="ln arr" d="M290,72 H306"/><path class="ln arr" d="M430,72 H446"/><path class="ln arr" d="M600,72 H616"/><path class="ln arr" d="M760,72 H776"/>
+      <path class="ln arr" style="stroke-dasharray:5 4" d="M865,104 V150 H70 V108"/>
+      <text class="c s" x="467" y="166">有工具调用就回到请求，继续下一步；没有就结束本轮（Claude Code 的 Stop hook 可以否决结束）</text>
+    </svg></div>
+    <figcaption>三个工具调用的执行条长短不一，表示它们并发运行、各自结束。插话和压缩都安排在一批工具执行完、下一次请求之前，这时历史是完整的：每个工具调用都已经有了结果。</figcaption>
+  </figure>
+  <div class="tbl"><table>
+    <thead><tr><th>环节</th><th>Pi</th><th>Codex</th><th>Claude Code</th></tr></thead>
+    <tbody>
+      <tr><th>每次请求发什么</th><td>从会话树的当前分支重建消息；扩展可以在每次请求前改写上下文</td><td>不用 <code>previous_response_id</code>，每次把完整历史发给 Responses API，便于零数据保留；推理内容加密后随历史一起回传</td><td>每次带上完整历史，靠 prompt cache 复用不变的前缀</td></tr>
+      <tr><th>多个工具调用</th><td>默认并行：同一条回复里的调用先逐个做检查，再并发执行</td><td>模型可以一次发起多个调用；MCP 服务器要声明 <code>supports_parallel_tool_calls</code> 才会并发调用它的工具</td><td>一条回复里的调用作为一批，整批完成后才发下一次请求</td></tr>
+      <tr><th>中途插话</th><td>两种：steering 消息在当前这批工具执行完后插入，follow-up 消息等任务做完再进入；中止时排队的消息退回编辑框</td><td>两种：steer 加入当前任务，queue 留到下一次任务</td><td>直接输入并回车，正在跑的工具调用结束后，同一轮里就会读到；按 Esc 立即停止并取消正在运行的工具调用</td></tr>
+      <tr><th>什么时候压缩</th><td>每批工具结果写回后、下一次请求前检查；新用户消息前也检查；上下文溢出报错时压缩后重试一次</td><td>超过自动压缩阈值时压缩，也可以设置一轮结束后按比例压缩；服务端压缩返回一个加密的 compaction 项</td><td>接近上限时自动压缩；如果单个巨大输出让压缩后立刻又满，几次后停止并报错，不会死循环</td></tr>
+      <tr><th>什么时候结束</th><td>回复里没有工具调用、也没有排队消息时结束</td><td>回复里没有工具调用时结束，最后一条消息交给用户</td><td>没有工具调用时结束，但 Stop hook 可以否决，让它继续干（<code>/goal</code> 就是这样实现的），最多连续 8 次；后台任务和定时任务也能唤醒它</td></tr>
+    </tbody>
+  </table></div>
+  <div class="grid2">
+    <div class="pt"><h3>为什么每次都发完整历史 <span class="chip warn">高频</span></h3>
+      <p>模型接口本身无状态，或者为了零数据保留而不在服务端存历史，所以每次请求都要把整段对话发过去。第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span> 次请求的长度 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>L</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">L_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span> 随 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span> 线性增长，一轮 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> 次请求总共要处理</p>
+      <div class="tex-d"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover><msub><mi>L</mi><mi>i</mi></msub><mo>=</mo><mi>O</mi><mo stretchy="false">(</mo><msup><mi>n</mi><mn>2</mn></msup><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\sum_{i=1}^{n}L_i=O(n^2)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.9291em;vertical-align:-1.2777em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6514em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></div>
+      <p>prompt cache 能复用之前算过的前缀，新增计算只剩每次追加的那一段，总计算量接近线性。前提是前缀一个字都不能变。</p></div>
+    <div class="pt"><h3>怎么保住缓存</h3>
+      <p>OpenAI 介绍 Codex 循环的文章里列了会破坏缓存的操作：中途增减工具、换模型、改沙箱或审批设置、换工作目录、MCP 工具列表顺序不稳定。</p>
+      <p>Codex 的做法是不改前面的内容：权限变了就追加一条新的 developer 消息，换了目录就追加一条 user 消息。对自己写 harness 的启示：系统提示词和工具列表放最前面且保持稳定，会变的信息一律追加在后面。</p></div>
+  </div>
+  <p class="note" style="max-width:none">一个容易被问到的细节：为什么插话和压缩都放在“一批工具执行完之后”？一个原因是主流模型接口都要求每个工具调用后面紧跟它的结果。如果在调用和结果之间塞进一条用户消息，或者把它们拆到摘要的两边，请求就不合法了。</p>
+</section>
+
+<section id="table" class="stack">
+  <div class="sec-head"><span class="eyebrow">一张表</span><h2>总览对比</h2></div>
+  <div class="tbl"><table>
+    <thead><tr><th>维度</th><th>Pi</th><th>Codex</th><th>Claude Code</th></tr></thead>
+    <tbody>
+      <tr><th>出品与开源</th><td>Mario Zechner 发起，现由 Earendil 维护；MIT 开源，TypeScript</td><td>OpenAI；Apache-2.0 开源，核心是 Rust</td><td>Anthropic；核心闭源，TypeScript；沙箱运行时 <code>sandbox-runtime</code> 开源</td></tr>
+      <tr><th>模型</th><td>多厂商：Anthropic、OpenAI、Google、xAI、OpenRouter 及任何 OpenAI 兼容接口，会话中途可换模型</td><td>以 OpenAI 模型为主，可在配置里加 <code>model_providers</code> 接其他服务</td><td>Claude 模型，走 Anthropic API 或 Bedrock、Google Cloud、Microsoft Foundry</td></tr>
+      <tr><th>默认工具</th><td>read、write、edit、bash 四个；grep、find、ls 有但默认关闭</td><td>以执行命令的 shell 和改文件的 <code>apply_patch</code> 为核心，另有搜索、MCP 等</td><td>几十个：Read、Edit、Write、Bash、WebFetch、WebSearch、Agent、Skill、任务列表等；macOS、Linux 上默认去掉 Glob、Grep，改用 Bash 里内嵌的 find、grep</td></tr>
+      <tr><th>改文件</th><td>edit：精确字符串替换</td><td><code>apply_patch</code>：补丁格式，一次可改多个文件</td><td>Edit：精确字符串替换</td></tr>
+      <tr><th>指令文件</th><td>AGENTS.md、CLAUDE.md（全局和项目）；可用 <code>.pi/SYSTEM.md</code> 整体替换系统提示词</td><td>AGENTS.md：从仓库根目录到当前目录逐层拼接，默认上限 32 KiB；同目录的 AGENTS.override.md 优先</td><td>CLAUDE.md：上级目录启动时加载，子目录按需加载，支持 <code>@</code> 导入；也能读 AGENTS.md；另有自动记忆</td></tr>
+      <tr><th>安全模型</th><td>不弹审批；project trust 只管是否加载项目里的扩展和配置；建议整个进程跑在容器或虚拟机里</td><td>系统级沙箱 + 审批策略；默认工作区可写、不能联网，越界时请求批准</td><td>权限规则 + 权限模式；交互默认 auto 模式，由分类器审查；Bash 沙箱默认关闭，可用 <code>/sandbox</code> 打开</td></tr>
+      <tr><th>长会话</th><td>会话是 JSONL 存的树，可从任意节点分叉；自动压缩，原始消息仍留在树里</td><td>自动压缩和 <code>/compact</code>；可本地压缩，也可经 Responses 接口在服务端压缩</td><td>自动压缩和 <code>/compact</code>；压缩后从磁盘重新加载 CLAUDE.md</td></tr>
+      <tr><th>子 agent</th><td>不内置；可装扩展，或让它通过 bash 再起一个 pi</td><td>默认开启，可自定义 agent 的模型和指令</td><td>Agent 工具，子 agent 有独立上下文窗口；还有 fork 和多 agent 协作</td></tr>
+      <tr><th>MCP</th><td>支持；默认 codemode 方式：工具不直接声明给模型，由模型写 JS 脚本调用</td><td>支持</td><td>支持；默认开启 tool search，开局只加载工具名，用到时再加载定义</td></tr>
+      <tr><th>扩展</th><td>TypeScript 扩展：注册工具、命令、快捷键、模型 provider，拦截工具调用；打包成 Pi package 用 npm 或 git 分发</td><td>skills、plugins、hooks、rules（Starlark 写的命令规则）</td><td>skills、hooks、子 agent、plugins、MCP</td></tr>
+      <tr><th>编程接口</th><td>print、JSON 模式，RPC（stdin、stdout 上的 JSONL），TypeScript SDK</td><td><code>codex exec</code> 非交互运行，app-server 协议，SDK</td><td><code>claude -p</code>，Agent SDK（TypeScript、Python）</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="max-width:none">这三个工具更新很快，表里是 2026 年 11 月官方文档里的状态。面试时说清“默认怎么做、为什么这么做”比背功能清单更重要。</p>
+</section>
+
+<section id="philosophy" class="stack">
+  <div class="sec-head"><span class="eyebrow">取舍</span><h2>三种设计哲学</h2></div>
+  <div class="grid2">
+    <div class="pt"><h3>Pi：最小内核，能力由用户加 <span class="chip tok">减法</span></h3>
+      <p>出发点是：模型已经被训练得很会用 bash 和读写文件，harness 越少越可控。作者 2025 年 11 月的文章里，系统提示词加工具定义不到 1000 token，上下文里有什么用户一清二楚，也更容易命中 prompt cache。</p>
+      <p>缺的功能用文件或扩展解决：计划写进 PLAN.md，待办写成带复选框的 TODO.md，长时间运行的进程交给 tmux。需要子 agent、计划模式、权限确认，就装扩展或自己写。</p>
+      <p>代价是开箱能力少，安全要自己负责。OpenClaw 就是在 Pi 上搭的。</p></div>
+    <div class="pt"><h3>Codex：把边界交给操作系统 <span class="chip seq">沙箱</span></h3>
+      <p>权限拆成两个独立的轴：<b>sandbox mode</b> 决定技术上能做什么（能写哪些目录、能不能联网），<b>approval policy</b> 决定什么时候停下来问人。默认是工作区可写加 <code>on-request</code>：工作区里随便改、随便跑，要联网或写工作区外才请求批准。</p>
+      <p>沙箱由系统强制执行：macOS 用 Seatbelt，Linux 和 WSL2 用 bubblewrap，Windows 有原生沙箱。云端任务跑在隔离容器里。好处是 agent 在边界内可以长时间不打扰人地跑。</p></div>
+    <div class="pt"><h3>Claude Code：开箱即用的完整 harness <span class="chip warn">加法</span></h3>
+      <p>内置工具多，功能全：子 agent、skills、hooks、plugins、任务列表、计划模式、定时任务。复杂工作流不用自己搭。</p>
+      <p>权限是“规则 + 模式”：规则写成 <code>Bash(npm run *)</code> 这样的模式，按 deny、ask、allow 的顺序匹配；没匹配到的由模式决定要不要问。auto 模式用后台分类器代替人审查命令和网络请求。沙箱是可选项，只包住 shell 命令。</p></div>
+    <div class="pt"><h3>趋同：功能越来越像 <span class="chip seq">趋势</span></h3>
+      <p>Pi 早期明确不做 MCP，现在内置了，但默认不把 MCP 工具直接声明给模型；也支持 skills。Codex 加了 hooks、skills、plugins、子 agent 和自动审查。Claude Code 在 macOS、Linux 上去掉了 Glob、Grep，改用 Bash 搜索，又加了沙箱。</p>
+      <p>真正的差别在<b>默认值</b>：默认给几个工具、默认在不在沙箱里、默认问不问人、默认上下文里放多少东西。</p></div>
+  </div>
+</section>
+
+<section id="safety" class="stack">
+  <div class="sec-head"><span class="eyebrow">必考</span><h2>安全模型：边界由谁来划</h2></div>
+  <p>Coding agent 的风险来自两处：模型自己犯错（比如删错目录），和 <b>prompt injection</b>（文件、网页、命令输出里藏着指令，模型照做了）。防御要回答一个问题：如果模型这一步是错的或被操纵的，最多能造成多大损失？</p>
+  <div class="tbl"><table>
+    <thead><tr><th>默认配置下</th><th>Pi</th><th>Codex（工作区可写 + on-request）</th><th>Claude Code</th></tr></thead>
+    <tbody>
+      <tr><th>读工作区文件</th><td>直接执行</td><td>直接执行</td><td>直接执行</td></tr>
+      <tr><th>改工作区文件</th><td>直接执行</td><td>直接执行</td><td>auto：直接执行；Manual：要确认</td></tr>
+      <tr><th>跑测试等本地命令</th><td>直接执行</td><td>在沙箱里直接执行</td><td>auto：分类器审查后执行；Manual：要确认（内置的只读命令除外）</td></tr>
+      <tr><th>命令需要联网</th><td>直接执行</td><td>沙箱默认断网，要批准</td><td>auto：分类器审查；Manual：要确认；开了沙箱则按域名白名单走代理</td></tr>
+      <tr><th>写工作区外的文件</th><td>直接执行，只受系统用户权限限制</td><td>要批准</td><td>auto：分类器审查；Manual：要确认</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="max-width:none">Claude Code 的交互会话从 v2.1.283 起默认是 auto 模式，Manual 模式（配置值 <code>default</code>）每个工具第一次用都要确认。Codex 已经去掉了旧的 <code>untrusted</code> 审批策略。</p>
+  <div class="grid2">
+    <div class="pt"><h3>为什么审批弹窗不算安全边界 <span class="chip warn">高频</span></h3>
+      <ul>
+        <li><b>审批疲劳</b>：一次任务几十上百个确认，人很快就会习惯性点同意。</li>
+        <li><b>看不到组合效果</b>：弹窗一次只看一条命令。先写一个脚本、再执行它，每一步单看都没问题。</li>
+        <li><b>看不懂</b>：一长串管道命令，人未必比模型更清楚它会做什么。</li>
+      </ul>
+      <p>Pi 的文档直接写明：看记录、信任项目、检查改动，都不构成安全边界。安全只能来自限制进程能碰到的文件、凭证、进程和网络。</p></div>
+    <div class="pt"><h3>三者把边界放在哪</h3>
+      <p><b>Pi</b>：放在 agent 外面。整个进程跑在容器或虚拟机里，只挂载任务需要的目录，凭证用短期、范围小的。</p>
+      <p><b>Codex</b>：放在命令执行这一层。每条命令都在系统沙箱里跑，审批只在越界时才出现，所以审批次数少，每次都值得看。</p>
+      <p><b>Claude Code</b>：规则和模式管所有工具，沙箱管 shell。文档特别说明：文件工具、MCP 服务器、hooks 都跑在沙箱外面，所以开了沙箱也还要配权限规则。</p></div>
+    <div class="pt"><h3>Claude Code 的规则怎么匹配</h3>
+      <p>按 deny、ask、allow 的顺序，第一个匹配的生效，和规则写得多具体无关：宽的 deny 规则 <code>Bash(aws *)</code> 会挡住 <code>aws s3 ls</code>，即使另有一条 allow 规则。命令里的每个子命令都要过 deny 和 ask，包括子 shell 和命令替换里的。</p>
+      <p>PreToolUse hook 也绕不过 deny 和 ask 规则。deny 规则在 <code>bypassPermissions</code> 模式下也生效。</p></div>
+    <div class="pt"><h3>Codex 的两个轴怎么组合</h3>
+      <p>sandbox mode 有三档：<code>read-only</code>、<code>workspace-write</code>、<code>danger-full-access</code>。approval policy 主要是 <code>on-request</code>（越界时问）和 <code>never</code>（从不停下来问）。</p>
+      <p>两者独立：<code>never</code> 加 <code>workspace-write</code> 适合 CI，不会卡在等人，但也出不了沙箱；“完全放开”是 <code>danger-full-access</code> 加 <code>never</code>。<code>approvals_reviewer</code> 可以把审批交给一个审查 agent，但这只换了审批的人，不会放大沙箱。沙箱外允许哪些命令，可以用 Starlark 写 rules。</p></div>
+  </div>
+</section>
+
+<section id="context" class="stack">
+  <div class="sec-head"><span class="eyebrow">上下文工程</span><h2>上下文工程：工具、指令文件与压缩</h2></div>
+  <div class="grid2">
+    <div class="pt"><h3>工具：少而通用 vs 多而专用</h3>
+      <p>工具定义每次请求都要带上，占上下文，工具多了模型还容易选错。Pi 只给四个，搜索、git、测试都走 bash。Claude Code 工具多，但专用工具能做更细的权限控制（比如按路径限制 Read），输出格式也更稳定。</p>
+      <p>两边在靠近：Claude Code 在 macOS、Linux 上把 Glob、Grep 去掉了，让模型直接用 bash 里的 find、grep。</p></div>
+    <div class="pt"><h3>改文件：字符串替换 vs 补丁</h3>
+      <p>Pi 和 Claude Code 的 edit 是精确字符串替换：给出旧文本和新文本，旧文本必须和文件内容逐字一致。Claude Code 还要求它在文件里只出现一次，否则报错，让模型多带几行上下文再试。好处是不用行号，文件被别人改过也不会改错位置。</p>
+      <p>Codex 用 <code>apply_patch</code>，一种类似 diff 的补丁格式，一次能增删改多个文件。OpenAI 的模型专门训练过这种格式。选哪种取决于模型训练时用的是哪种。</p></div>
+    <div class="pt"><h3>指令文件：怎么加载</h3>
+      <p>Codex 从仓库根目录走到当前目录，每层取一个 AGENTS.md（有 AGENTS.override.md 就用它），按顺序拼接，越靠近当前目录的越靠后、优先级越高，总长默认截断在 32 KiB。</p>
+      <p>Claude Code 启动时加载上级目录的 CLAUDE.md，子目录里的等用到那个目录再加载；可以用 <code>@path</code> 导入其他文件，建议单个文件不超过 200 行。Pi 两种文件名都认，不管项目是否受信任都会加载。</p></div>
+    <div class="pt"><h3>压缩：长会话怎么办</h3>
+      <p>Pi 的自动压缩在 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>C</mi><mtext>ctx</mtext></msub><mo>&gt;</mo><mi>W</mi><mo>−</mo><mi>R</mi></mrow><annotation encoding="application/x-tex">C_{\text{ctx}}&gt;W-R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">ctx</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span></span> 时触发，<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>C</mi><mtext>ctx</mtext></msub></mrow><annotation encoding="application/x-tex">C_{\text{ctx}}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">ctx</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span> 是当前上下文长度，<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi></mrow><annotation encoding="application/x-tex">W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span> 是窗口大小，<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi></mrow><annotation encoding="application/x-tex">R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span></span> 默认 16384。从最新消息往回保留约 20k token，更早的交给模型写成结构化摘要；原始消息仍留在会话文件里，只是不再发给模型。</p>
+      <p>Claude Code 也是自动压缩，可以 <code>/compact</code> 指定重点；压缩后会从磁盘重新加载 CLAUDE.md，只在对话里说过的指令可能丢失。Codex 可以在本地压缩，也可以交给 Responses 接口在服务端压缩。</p></div>
+  </div>
+  <div class="pt"><h3>Pi 的会话是一棵树 <span class="chip tok">特色</span></h3>
+    <p>会话存成 JSONL，每条记录有自己的 id 和父节点 id。从之前某一步继续就是在树上开一个新分支，原来的分支还在；当前分支决定下一次请求带哪些历史。切换分支时可以把离开的那条分支总结成摘要带过来。这样试错不会污染主线：走偏了就回到分叉点重来，而不是在上下文里堆一堆失败的尝试。</p>
+  </div>
+</section>
+
+<section id="ext" class="stack">
+  <div class="sec-head"><span class="eyebrow">扩展</span><h2>扩展机制：MCP、Skills、Hooks、子 agent</h2></div>
+  <div class="grid2">
+    <div class="pt"><h3>MCP：工具多了怎么办</h3>
+      <p>一个 MCP 服务器常有几十个工具，定义全部塞进上下文很贵。Pi 作者 2025 年测过：Playwright MCP 约 13.7k token，Chrome DevTools MCP 约 18k token。三种解法：</p>
+      <ul>
+        <li><b>延迟加载</b>：开局只给工具名，模型用搜索工具找到后再加载定义。Claude Code 的 tool search 默认开启，Pi 叫 <code>deferred</code>。</li>
+        <li><b>codemode</b>：只给模型一个“写脚本”的工具，模型在脚本里调用 MCP 工具、过滤结果，只有脚本的输出进上下文。Pi 的 MCP 默认这样做，脚本跑在没有文件和网络权限的 QuickJS 沙箱里。</li>
+        <li><b>不用 MCP</b>：给模型一个命令行工具和它的 README，用 bash 调用。</li>
+      </ul></div>
+    <div class="pt"><h3>Skills：按需加载的说明书</h3>
+      <p>一个 skill 是一个目录，里面有 SKILL.md 和附带文件。开局只把每个 skill 的简短描述放进上下文，模型判断用得上时才读全文，附带的参考文档用到再读。三者都支持。</p>
+      <p>和 MCP 的区别：MCP 提供<b>新的能力</b>（工具），skill 提供<b>做事的方法</b>（指令和脚本），通常还是用已有的 bash、read 去执行。skill 便宜，因为只有描述常驻上下文。</p></div>
+    <div class="pt"><h3>Hooks：确定性的规则</h3>
+      <p>skill、MCP 都要模型自己决定用不用；hook 是 harness 在固定事件上一定会执行的代码，比如工具调用前、调用后、压缩前、会话开始。适合“每次改完文件都跑格式化”“禁止改某个目录”这类不能靠模型自觉的规则。</p>
+      <p>Claude Code 和 Codex 用配置文件声明 hook，调用外部命令；Pi 用扩展监听事件，<code>tool_call</code> 事件可以改参数或直接拦截，权限确认就可以这样实现。</p></div>
+    <div class="pt"><h3>子 agent：隔离上下文的代价</h3>
+      <p>好处：子 agent 有自己的上下文窗口，读几十个文件、跑一堆搜索，最后只把结论交回主对话，主上下文保持干净；多个子 agent 还能并行。</p>
+      <p>代价：每个子 agent 都要自己读一遍上下文，token 消耗更多；主 agent 看不到子 agent 的过程，出错不好排查。Pi 作者正是因为“看不到它在干什么”而不内置，需要时让 pi 通过 bash 再起一个 pi。</p></div>
+  </div>
+</section>
+
+<section id="lab" class="stack">
+  <div class="sec-head"><span class="eyebrow">交互实验</span><h2>动手试：MCP 工具占多少上下文</h2></div>
+  <div class="lab">
+    <p>假设接了 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span> 个 MCP 工具，每个工具定义平均 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span></span></span></span> token，这一轮实际用到 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span> 个，每次调用返回 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi></mrow><annotation encoding="application/x-tex">r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span> token。三种接法这一轮占用的上下文：</p>
+    <div class="tex-d"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>C</mi><mtext>全量</mtext></msub><mo>=</mo><mi>N</mi><mi>t</mi><mo>+</mo><mi>k</mi><mi>r</mi><mo separator="true">,</mo><mspace width="2em"/><msub><mi>C</mi><mtext>延迟</mtext></msub><mo>=</mo><mi>N</mi><mi>c</mi><mo>+</mo><mi>k</mi><mi>t</mi><mo>+</mo><mi>k</mi><mi>r</mi><mo separator="true">,</mo><mspace width="2em"/><msub><mi>C</mi><mtext>codemode</mtext></msub><mo>=</mo><mi>T</mi><mo>+</mo><mi>k</mi><mi>t</mi><mo>+</mo><mi>f</mi><mi>k</mi><mi>r</mi></mrow><annotation encoding="application/x-tex">C_{\text{全量}}=Nt+kr,\qquad C_{\text{延迟}}=Nc+kt+kr,\qquad C_{\text{codemode}}=T+kt+fkr</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">全量</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">Nt</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">延迟</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mord mathnormal">c</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mord mathnormal">t</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">codemode</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mord mathnormal">t</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span></span></div>
+    <p><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span></span></span></span> 是只列工具名时每个工具的开销，取 15；<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi></mrow><annotation encoding="application/x-tex">T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span></span></span></span> 是 codemode 工具本身的说明，取 1200；<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi></mrow><annotation encoding="application/x-tex">f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span></span></span></span> 是脚本过滤后留给模型的比例。这几个常数是示意值。</p>
+    <div class="row">
+      <label class="fld"><span class="lbl">工具数 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span></span><input type="range" id="xN" min="0" max="300" step="5" value="80"><span class="mono" id="xNv"></span></label>
+      <label class="fld"><span class="lbl">每个定义 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span></span></span></span></span><input type="range" id="xT" min="100" max="1500" step="50" value="350"><span class="mono" id="xTv"></span></label>
+      <label class="fld"><span class="lbl">用到的工具数 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span><input type="range" id="xK" min="0" max="20" step="1" value="3"><span class="mono" id="xKv"></span></label>
+      <label class="fld"><span class="lbl">每次返回 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi></mrow><annotation encoding="application/x-tex">r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span></span><input type="range" id="xR" min="100" max="20000" step="100" value="4000"><span class="mono" id="xRv"></span></label>
+      <label class="fld"><span class="lbl">保留比例 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi></mrow><annotation encoding="application/x-tex">f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span></span></span></span></span><input type="range" id="xF" min="1" max="100" step="1" value="10"><span class="mono" id="xFv"></span></label>
+    </div>
+    <div class="cbars" id="xbars"></div>
+    <div class="cleg"><span><i class="cdef"></i>工具定义</span><span><i class="cres"></i>调用结果</span></div>
+    <div class="verdict" id="xmsg" aria-live="polite"></div>
+  </div>
+  <p class="note" style="max-width:none">prompt cache 能让重复带上的工具定义变便宜，但它们仍然占着上下文窗口，也会分散模型的注意力。codemode 还有一个没算进去的开销：模型要多写一段脚本，有时还要先搜索工具再调用，多一轮请求。</p>
+</section>
+
+<section id="code" class="stack">
+  <div class="sec-head"><span class="eyebrow">手撕</span><h2>手撕：最小 coding agent</h2></div>
+  <p>Pi 的核心大致就是下面这些：一个循环、四个工具、一份简短的系统提示词。<code>llm</code> 代表任意支持工具调用的模型接口，返回文本和工具调用列表。</p>
+<pre><code>import json, subprocess, pathlib
+
+def read(path, offset=0, limit=2000):
+    lines = pathlib.Path(path).read_text().splitlines()
+    return "\n".join(lines[offset:offset + limit])
+
+def write(path, content):
+    p = pathlib.Path(path); p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content); return f"wrote {len(content)} chars"
+
+def edit(path, old_text, new_text):
+    s = pathlib.Path(path).read_text()
+    n = s.count(old_text)
+    if n != 1:                                    <span class="cm"># 必须唯一匹配，否则让模型补充上下文</span>
+        return f"error: old_text matched {n} times"
+    pathlib.Path(path).write_text(s.replace(old_text, new_text)); return "ok"
+
+def bash(command, timeout=120):
+    r = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
+    out = r.stdout + r.stderr
+    return out[-30000:] + f"\n[exit {r.returncode}]"   <span class="cm"># 截断过长输出，只保留结尾</span>
+
+TOOLS = {"read": read, "write": write, "edit": edit, "bash": bash}
+agents_md = pathlib.Path("AGENTS.md")
+SYSTEM = "You are a coding agent. Use the tools to inspect and change files.\n" \
+         + (agents_md.read_text() if agents_md.exists() else "")
+
+def run(messages):
+    while True:
+        text, calls = llm(SYSTEM, messages, tools=TOOLS)     <span class="cm"># 模型返回文本和工具调用</span>
+        messages.append({"role": "assistant", "content": text, "tool_calls": calls})
+        if not calls:
+            return text                                     <span class="cm"># 没有工具调用：本轮结束</span>
+        for c in calls:
+            if not allowed(c):                              <span class="cm"># 权限检查：规则、审批或分类器</span>
+                result = "denied by user"
+            else:
+                try:
+                    result = TOOLS[c["name"]](**json.loads(c["arguments"]))
+                except Exception as e:
+                    result = f"error: {e}"                  <span class="cm"># 报错也交回模型，让它自己修</span>
+            messages.append({"role": "tool", "id": c["id"], "content": result})
+        if token_count(messages) &gt; WINDOW - RESERVE:
+            messages = compact(messages)                    <span class="cm"># 摘要旧消息，保留最近一段</span></code></pre>
+  <p class="note" style="max-width:none">要点：工具报错不抛给用户，而是作为结果交回模型；输出要截断；<code>allowed</code> 和 <code>compact</code> 是三者差别最大的两个函数。生产级实现还要处理流式输出、中途插话、取消、并行工具调用和 prompt cache。</p>
+</section>
+
+<section id="qa" class="stack">
+  <div class="sec-head"><span class="eyebrow">自测</span><h2>高频追问</h2></div>
+  <div class="tools"><button type="button" id="openAll">全部展开</button><button type="button" id="closeAll">全部收起</button></div>
+  <div class="qa">
+    <details><summary>Pi、Codex、Claude Code 最大的区别是什么？</summary><div class="ans">
+      <p>agent loop 是一样的，区别在 harness 的默认值。Pi 做减法：四个工具、短提示词、不弹审批，靠容器隔离，其余功能由扩展提供。Codex 靠系统沙箱：命令在 Seatbelt、bubblewrap 等沙箱里跑，默认工作区可写、断网，越界才问。Claude Code 功能最全：工具多，子 agent、skills、hooks 都内置，权限用规则加模式，auto 模式由分类器审查。另外 Pi 支持多家模型，Codex、Claude Code 主要配自家模型。</p></div></details>
+    <details><summary>三者的 agent loop 有什么不同？</summary><div class="ans">
+      <p>骨架相同：请求、回复、执行工具、写回结果，直到回复里没有工具调用。不同在细节：</p>
+      <ul>
+        <li><b>请求内容</b>：Codex 不用 <code>previous_response_id</code>，每次把完整历史发给 Responses API，推理内容加密回传；权限、目录变化以追加消息的方式表达，保住缓存前缀。Pi 每次从会话树的当前分支重建上下文，扩展还能改写它。</li>
+        <li><b>工具执行</b>：一条回复里的多个调用，Pi 默认先逐个检查再并发执行；Claude Code 按批执行，整批完成才发下一次请求；Codex 对 MCP 工具要服务器声明可并行才并发。</li>
+        <li><b>插话</b>：都分两种，一种插进当前任务（Pi 的 steering、Codex 的 steer、Claude Code 的排队消息），一种等任务结束（Pi 的 follow-up、Codex 的 queue）。插入点在一批工具执行完之后。</li>
+        <li><b>结束</b>：默认都是没有工具调用就结束；Claude Code 的 Stop hook 可以否决，让模型继续，<code>/goal</code> 就是这样实现的。</li>
+      </ul></div></details>
+    <details><summary>Pi 只有四个工具，够用吗？为什么这样设计？</summary><div class="ans">
+      <p>够用。bash 能做搜索、git、跑测试、装依赖，前沿模型在后训练时大量练过这些。工具少的好处：系统提示词短，省上下文、容易命中缓存；模型不会在一堆相似工具里选错；用户清楚上下文里有什么。Terminal-Bench 上也能看到，很简单的 harness 不一定比复杂的差。</p>
+      <p>代价是专用工具的好处没了：比如按路径做权限控制、结构化的输出、对大文件的分页读取。Pi 的 read 自带分页，这一点没丢。</p></div></details>
+    <details><summary>审批弹窗为什么不算安全边界？应该怎么做？</summary><div class="ans">
+      <p>三个原因：次数多了人会习惯性点同意；每次只看一条命令，看不到“先写脚本再执行”这种组合；复杂命令人也看不懂。再加上 prompt injection，文件、网页、命令输出都可能操纵模型。</p>
+      <p>真正的边界是限制进程能接触到的东西：在容器或虚拟机里跑，或者用系统沙箱（Codex 的默认做法），只给需要的目录、关掉不需要的网络、用短期凭证。审批应该少而有意义：只在越过边界时出现。</p></div></details>
+    <details><summary>Codex 的 sandbox mode 和 approval policy 是什么关系？</summary><div class="ans">
+      <p>两个独立的轴。sandbox mode 是技术限制：<code>read-only</code> 只能读，<code>workspace-write</code> 能写工作区、默认断网，<code>danger-full-access</code> 没有限制。approval policy 决定什么时候停下来问：<code>on-request</code> 在要越过沙箱时问，<code>never</code> 从不问。</p>
+      <p>默认 <code>workspace-write</code> 加 <code>on-request</code>。CI 里常用 <code>never</code>，跑不出沙箱的命令直接失败，不会卡住。把审批交给审查 agent（<code>auto_review</code>）只是换了审批人，不会放大沙箱。</p></div></details>
+    <details><summary>Claude Code 的 auto 模式和 bypassPermissions 有什么区别？</summary><div class="ans">
+      <p>auto 模式不弹窗，但每个命令、网络请求执行前都会经过一个后台分类器，检查是否符合用户的请求，有风险的会被拦下。bypassPermissions 完全跳过检查，文档要求只在容器或虚拟机这种隔离环境里用。两者都受 deny 规则约束。</p></div></details>
+    <details><summary>MCP 工具太多，上下文不够用怎么办？</summary><div class="ans">
+      <p>三种办法。延迟加载：开局只给工具名，用搜索找到再加载定义，Claude Code 默认如此。codemode：只暴露一个写脚本的工具，模型在脚本里调 MCP、过滤结果，只有输出进上下文，Pi 的 MCP 默认如此，适合结果很大、只需要一小部分的场景。第三种是干脆不用 MCP，给一个命令行工具和 README，让模型用 bash 调。</p></div></details>
+    <details><summary>Skills 和 MCP 有什么区别？</summary><div class="ans">
+      <p>MCP 提供新的工具，每个工具的定义都要进上下文（除非延迟加载）。skill 是一份按需读取的说明书加脚本：开局只放一句描述，用得上时才读 SKILL.md 全文，执行时通常还是用 bash、read 这些已有工具。所以 skill 很便宜，适合沉淀“怎么做某件事”；MCP 适合接入需要鉴权、有状态的外部服务。</p></div></details>
+    <details><summary>子 agent 有什么用？Pi 为什么默认不带？</summary><div class="ans">
+      <p>主要用来隔离上下文：让子 agent 去读大量文件、做调研，只把结论交回来，主对话不被中间过程塞满；独立任务还能并行。代价是 token 更多，而且主 agent 和用户看不到子 agent 做了什么，出错难排查。Pi 作者看重可观察性，所以不内置；需要时可以装扩展，或让 pi 通过 bash 起一个新的 pi 进程。</p></div></details>
+    <details><summary>长会话怎么压缩？压缩会丢什么？</summary><div class="ans">
+      <p>接近窗口上限时，保留最近一段消息，把更早的交给模型写成摘要，用摘要替换旧消息。Pi 在剩余空间不到 16384 token 时触发，保留最近约 20k token，摘要是结构化的，会记录改过哪些文件；原始消息留在会话文件里。</p>
+      <p>会丢细节：早期对话里给的指令、试错的过程、具体报错。所以持久的规则要写进 AGENTS.md 或 CLAUDE.md，Claude Code 压缩后会从磁盘重新加载它们。</p></div></details>
+    <details><summary>改文件用字符串替换和 <code>apply_patch</code> 各有什么优缺点？</summary><div class="ans">
+      <p>字符串替换（Pi、Claude Code）：模型给出要替换的原文和新文本，原文必须逐字匹配，不依赖行号，文件被并发修改时也不容易改错位置；缺点是每处修改都要带足上下文，一次只改一处。</p>
+      <p><code>apply_patch</code>（Codex）：补丁格式，一次可以改多个文件、多个位置，也能新建、删除文件；格式更复杂，写错容易应用失败。关键是和模型训练时用的格式一致，OpenAI 的模型专门训练过这种补丁格式。</p></div></details>
+    <details><summary>会话中途换模型会遇到什么问题？</summary><div class="ans">
+      <p>各家的思考内容格式不一样，有的还加密或带签名，不能直接发给别家模型。Pi 作者 2025 年的文章里介绍的做法是：切换厂商时把思考内容转成普通文本，包在 <code>&lt;thinking&gt;</code> 标签里，他也承认这并不完美。另外工具调用的格式要互相转换，prompt cache 会失效，新模型也可能不习惯前一个模型留下的风格。</p></div></details>
+    <details><summary>让你从零写一个 coding agent，最少需要什么？</summary><div class="ans">
+      <p>一个循环加四个工具（读、写、改、执行命令）就能跑。然后按重要性补：输出截断和错误回传、加载 AGENTS.md、上下文压缩、会话持久化、取消和中途插话、权限或沙箱、prompt cache。先保证上下文干净、可观察，再加功能。</p></div></details>
+  </div>
+</section>
+
+<section id="tpl" class="stack">
+  <div class="sec-head"><span class="eyebrow">2 分钟口述</span><h2>答题模板</h2></div>
+  <ol class="tpl">
+    <li><b>共同点。</b>三者都是同一个 agent loop：模型提出工具调用，harness 执行并回填结果。循环细节有差别：并行执行工具、两种插话队列、压缩时机、Stop hook 能否否决结束；Codex 每次发完整历史，靠稳定前缀保缓存。</li>
+    <li><b>Pi。</b>做减法：四个工具、短提示词、不弹审批，靠容器隔离；子 agent、计划模式等由扩展提供；支持多家模型，会话是可分叉的树。</li>
+    <li><b>Codex。</b>靠系统沙箱：sandbox mode 管能做什么，approval policy 管什么时候问；默认工作区可写、断网，越界才问。Rust 写的，开源。</li>
+    <li><b>Claude Code。</b>开箱即用：工具多，子 agent、skills、hooks、plugins 都内置；权限是规则加模式，auto 模式用分类器审查；沙箱可选，只管 shell。</li>
+    <li><b>取舍。</b>可控性和上下文干净（Pi），安全边界强、可以长时间无人值守（Codex），功能全、上手快（Claude Code）。三家在趋同，差别主要在默认值。</li>
+  </ol>
+  <p class="note">常见失分点：把审批弹窗当成安全边界；以为 Claude Code 默认开了沙箱（默认关闭，而且只管 shell 命令）；说 Pi 不支持 MCP（早期不支持，现在内置，默认用 codemode 方式）；以为工具越多越强。</p>
+  <div class="src">资料来源：
+    <ul>
+      <li><a href="https://mariozechner.at/posts/2025-11-30-pi-coding-agent/">What I learned building an opinionated and minimal coding agent（Pi 作者）</a> · <a href="https://github.com/earendil-works/pi-mono">pi-mono 仓库与 coding-agent 文档</a>（How Pi Works、Security、Compaction、MCP、Codemode、Extensions）</li>
+      <li><a href="https://openai.com/index/unrolling-the-codex-agent-loop/">Unrolling the Codex agent loop（OpenAI）</a> · <a href="https://github.com/openai/codex">openai/codex 仓库</a> · <a href="https://developers.openai.com/codex/prompting">Codex Prompting（steer 与 queue）</a> · <a href="https://developers.openai.com/codex/sandboxing">Codex Sandboxing</a> · <a href="https://developers.openai.com/codex/agent-approvals-security">Agent approvals &amp; security</a> · <a href="https://developers.openai.com/codex/guides/agents-md">AGENTS.md</a></li>
+      <li><a href="https://code.claude.com/docs/en/how-claude-code-works">How Claude Code works</a> · <a href="https://code.claude.com/docs/en/hooks">Hooks</a> · <a href="https://code.claude.com/docs/en/permissions">Claude Code Permissions</a> · <a href="https://code.claude.com/docs/en/permission-modes">Permission modes</a> · <a href="https://code.claude.com/docs/en/sandboxing">Sandboxing</a> · <a href="https://code.claude.com/docs/en/tools-reference">Tools reference</a> · <a href="https://code.claude.com/docs/en/memory">Memory</a> · <a href="https://code.claude.com/docs/en/mcp">MCP</a></li>
+    </ul>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  function fmt(x){return x>=10000?(x/1000).toFixed(1).replace(/\.0$/,"")+"k":String(Math.round(x));}
+  var ids=["xN","xT","xK","xR","xF"], el={};
+  ids.forEach(function(i){el[i]=document.getElementById(i);});
+  var C=15, T=1200;
+  function draw(){
+    var N=+el.xN.value, t=+el.xT.value, k=+el.xK.value, r=+el.xR.value, f=el.xF.value/100;
+    document.getElementById("xNv").textContent=N;
+    document.getElementById("xTv").textContent=t+" token";
+    document.getElementById("xKv").textContent=k;
+    document.getElementById("xRv").textContent=r+" token";
+    document.getElementById("xFv").textContent=el.xF.value+"%";
+    var S=[
+      {n:"全量声明",d:N*t,r:k*r},
+      {n:"延迟加载",d:N*C+k*t,r:k*r},
+      {n:"codemode",d:T+k*t,r:f*k*r}
+    ];
+    var mx=Math.max.apply(null,S.map(function(s){return s.d+s.r;}))||1, h="";
+    S.forEach(function(s){
+      var tot=s.d+s.r;
+      h+='<div class="cname">'+s.n+'</div><div class="ctrack"><i class="cdef" style="width:'+(s.d/mx*100)+'%"></i><i class="cres" style="width:'+(s.r/mx*100)+'%"></i></div><div class="cnum">'+fmt(tot)+'</div>';
+    });
+    document.getElementById("xbars").innerHTML=h;
+    var a=S[0].d+S[0].r, b=S[1].d+S[1].r, c=S[2].d+S[2].r, msg;
+    if(N*t<=3000) msg="工具定义总共只有 "+fmt(N*t)+" token，直接全量声明最简单；延迟加载省得不多，还要多一次搜索。";
+    else{
+      msg="全量声明光工具定义就占 "+fmt(N*t)+" token，延迟加载把它降到 "+fmt(S[1].d)+" token。";
+      if(k*r<1) msg+="这一轮没调用工具，codemode 和延迟加载差不多。";
+      else if(f>=0.8) msg+="调用结果基本都要给模型看时，codemode 过滤不了多少，还多一层写脚本的开销，延迟加载更合适。";
+      else msg+="codemode 再把调用结果从 "+fmt(k*r)+" 过滤到 "+fmt(f*k*r)+" token，适合返回内容大、只需要其中一小部分的工具（网页、日志、数据库查询）。";
+    }
+    if(a>200000) msg+=" 注意全量声明这一轮已经超过 200k token。";
+    document.getElementById("xmsg").textContent=msg;
+  }
+  ids.forEach(function(i){el[i].addEventListener("input",draw);});
+  draw();
+
+  var ds=document.querySelectorAll("#qa details");
+  document.getElementById("openAll").addEventListener("click",function(){ds.forEach(function(d){d.open=true;});});
+  document.getElementById("closeAll").addEventListener("click",function(){ds.forEach(function(d){d.open=false;});});
+})();
+</script>
+</body>
+</html>
