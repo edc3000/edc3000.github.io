@@ -6,8 +6,8 @@
  * 这里是分类的唯一登记处:中文名、简介和侧栏顺序都以此为准。
  */
 export const INTERVIEW_CATEGORIES = [
-  { key: 'basics', label: '基础知识', blurb: 'Norm、初始化、优化器、Attention 原理、位置编码、解码与评估' },
-  { key: 'architecture', label: '模型架构', blurb: 'MHA/GQA、MoE、线性注意力、MTP、模型家族演进' },
+  { key: 'basics', label: '基础知识', blurb: 'Transformer 结构、Norm、初始化、优化器、Attention 原理、解码与评估' },
+  { key: 'architecture', label: '模型架构', blurb: 'MHA/GQA、位置编码、MoE、线性注意力、MTP、模型家族演进' },
   { key: 'algorithms', label: '算法', blurb: 'SFT 与 LoRA、DPO/PPO/GRPO、蒸馏、scaling 与超参' },
   { key: 'infra', label: 'Infra', blurb: 'KV Cache、FlashAttention、数值精度、训练框架、推理延迟' },
   { key: 'agent', label: 'Agent', blurb: 'RAG、Agent 架构、工具调用' },
