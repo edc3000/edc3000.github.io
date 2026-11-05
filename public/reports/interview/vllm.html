@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- 搜索结果跳到知识库里带侧栏的条目页,而不是这份裸 HTML -->
+<meta data-pagefind-meta="url[content]" content="/interview/infra/vllm/">
+<meta name="description" content="vLLM 从 v0.1 到 v0.32 的演进:PagedAttention 与前缀缓存的实现,V1 引擎的进程拆分与统一 token 调度,chunked prefill、抢占,CUDA graph 分段与 FULL_AND_PIECEWISE,异步调度,Model Runner V2,分布式、PD 分离与 KV 卸载,关键参数与 KV cache 大小的确定。配调度器模拟、块管理器代码与高频追问。">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>vLLM：从 PagedAttention 到 V1 引擎与 Model Runner V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@600;900&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous">
+<style>
+/* Layout: 与其他八股页同一套规格书式单栏长文 */
+:root{
+  --bg:#EFF2F4; --surface:#FFFFFF; --surface-2:#F7F9FA;
+  --ink:#16212B; --muted:#5B6873; --line:#D3DAE0; --line-strong:#9AA6B0;
+  --seq:#2F5FD0; --seq-bg:#E3EBFB;
+  --tok:#0C8578; --tok-bg:#DBF1ED;
+  --pos:#2E7D32; --pos-bg:#E3F2E4;
+  --neg:#C2412D; --neg-bg:#FBE7E3;
+  --warn:#B0731A; --warn-bg:#F7EBD6;
+  --norm-bg:#EAEEF1;
+  --display:"Noto Serif SC","Songti SC",serif;
+  --sans:-apple-system,"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --seq:#86A7F4; --seq-bg:#1C2A47;
+  --tok:#4CC6B6; --tok-bg:#11332F;
+  --pos:#6FCF7A; --pos-bg:#16301A;
+  --neg:#FF8A73; --neg-bg:#3B1E18;
+  --warn:#E2A851; --warn-bg:#382A13;
+  --norm-bg:#212C37;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --seq:#86A7F4; --seq-bg:#1C2A47;
+  --tok:#4CC6B6; --tok-bg:#11332F;
+  --pos:#6FCF7A; --pos-bg:#16301A;
+  --neg:#FF8A73; --neg-bg:#3B1E18;
+  --warn:#E2A851; --warn-bg:#382A13;
+  --norm-bg:#212C37;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.75}
+.wrap{max-width:1040px;margin:0 auto;padding-block:40px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:56px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.3}
+h1{font-size:clamp(28px,5vw,44px);font-weight:900;letter-spacing:.01em}
+h2{font-size:clamp(22px,3.2vw,28px);font-weight:900}
+h3{font-size:19px;font-weight:600}
+p{margin:0;max-width:68ch}
+code,.mono{font-family:var(--mono);font-size:.9em}
+a{color:var(--seq)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--seq);outline-offset:3px;border-radius:4px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.stack{display:flex;flex-direction:column;gap:16px}
+.sec-head{display:flex;flex-direction:column;gap:6px;border-top:2px solid var(--ink);padding-top:14px}
+
+header{display:flex;flex-direction:column;gap:18px}
+.lede{font-size:17px;color:var(--muted);max-width:60ch}
+.toc{display:flex;flex-wrap:wrap;gap:8px}
+.toc a{font-size:13.5px;text-decoration:none;color:var(--ink);border:1px solid var(--line);background:var(--surface);padding:4px 12px;border-radius:999px}
+.toc a:hover{border-color:var(--ink)}
+
+.recite{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--ink);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.recite p{max-width:none}
+.recite .tag{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.08em}
+mark{background:var(--warn-bg);color:inherit;padding:0 3px;border-radius:3px}
+
+figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.scroll{overflow-x:auto}
+.dg{display:block;width:100%;min-width:760px;height:auto}
+figcaption{font-size:13.5px;color:var(--muted)}
+.dg text{fill:var(--ink);font-family:var(--sans);font-size:12.5px}
+.dg .c{text-anchor:middle;dominant-baseline:central}
+.dg .s{font-size:11.5px;fill:var(--muted)}
+.dg .h{font-weight:700;font-size:13.5px}
+.dg .m{font-family:var(--mono);font-size:11.5px}
+.dg rect{stroke-width:1.2}
+.b-io{fill:var(--surface);stroke:var(--ink)}
+.b-seq{fill:var(--seq-bg);stroke:var(--seq)}
+.b-tok{fill:var(--tok-bg);stroke:var(--tok)}
+.b-pos{fill:var(--pos-bg);stroke:var(--pos)}
+.b-neg{fill:var(--neg-bg);stroke:var(--neg)}
+.b-ref{fill:var(--warn-bg);stroke:var(--warn)}
+.panel{fill:var(--surface-2);stroke:var(--line)}
+.ln{stroke:var(--muted);stroke-width:1.3;fill:none}
+.arr{marker-end:url(#ah)}
+.ahp{fill:var(--muted)}
+.dg .pos{fill:var(--pos)}
+.dg .neg{fill:var(--neg)}
+.dg .zero{fill:var(--warn-bg);stroke:none}
+.dg .gd{stroke:var(--line-strong);stroke-width:1;stroke-dasharray:3 3}
+.dg .ax{stroke:var(--ink);stroke-width:1.2}
+.dg .cl-raw{stroke:var(--muted);stroke-width:1.4;stroke-dasharray:6 4;fill:none}
+.dg .cl-clip{stroke:var(--seq);stroke-width:2.6;fill:none}
+.dg .dot{fill:var(--neg)}
+
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.pt{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pt h3{font-family:var(--sans);font-size:15.5px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0}
+.pt p,.pt li{font-size:14.5px;line-height:1.7}
+.pt ul{margin:0;padding-left:1.2em}
+.chip{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;border:1px solid;letter-spacing:.03em}
+.chip.seq{color:var(--seq);border-color:var(--seq);background:var(--seq-bg)}
+.chip.tok{color:var(--tok);border-color:var(--tok);background:var(--tok-bg)}
+.chip.warn{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.note{font-size:14px;color:var(--muted);border:1px dashed var(--line-strong);border-radius:8px;padding:12px 14px}
+/* KaTeX 的 MathML 是绝对定位的，容器要定位才能把它裁在里面，否则手机上会横向溢出 */
+.scroll,.tbl,.tex-d,.fo,.katex{position:relative}
+.fo{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-family:var(--sans);font-size:12.5px;line-height:1.25;color:var(--ink)}
+.fo .katex{font-size:1.02em}
+.fo .fs,.fo.fs{font-size:11.5px;color:var(--muted)}
+.fo.fs .katex{color:var(--ink)}
+.tex-d{overflow-x:auto;overflow-y:hidden}
+.tex-d .katex-display{margin:.3em 0}
+.katex{font-size:1.08em}
+.terms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.term{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.term .k{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.term p{font-size:14.5px}
+pre{margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.6;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto}
+pre .cm{color:var(--muted)}
+
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:680px;font-size:13.5px;line-height:1.55}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+thead th{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--muted);background:var(--surface-2)}
+tbody th{font-weight:700;white-space:nowrap}
+tr:last-child th,tr:last-child td{border-bottom:0}
+td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+td.cut{background:var(--warn-bg)}
+.posv{color:var(--pos);font-weight:600}
+.negv{color:var(--neg);font-weight:600}
+.flow{color:var(--pos)} .stop{color:var(--warn);font-weight:600}
+
+/* lab */
+.lab{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:16px}
+.lab h3{font-family:var(--sans);font-size:15.5px;font-weight:700}
+.row{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:flex-end}
+.fld{display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.fld input[type=number]{font:inherit;font-family:var(--mono);font-size:13px;width:84px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+input:focus-visible{outline:2px solid var(--seq);outline-offset:1px}
+.chk{display:flex;gap:6px;align-items:center;font-size:13.5px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button[aria-pressed=true]{border-color:var(--ink);background:var(--surface-2);font-weight:700}
+.toks{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.tk{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface-2);min-width:0}
+.tk .w{font-weight:700;font-size:14px}
+.tk .v{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tk input[type=range]{width:100%}
+.tk label.v{display:flex;flex-direction:column;gap:2px}
+.fld select{font:inherit;font-family:var(--mono);font-size:13px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+.mbar{display:flex;height:26px;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;background:var(--surface-2)}
+.mbar span{display:block;height:100%}
+.mw{background:var(--seq)} .mk{background:var(--tok)} .mf{background:var(--surface-2)} .mo{background:var(--neg)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;border:1px solid var(--line-strong)}
+.verdict{font-size:14px;border-left:3px solid var(--warn);padding:6px 12px;background:var(--warn-bg);border-radius:0 6px 6px 0}
+
+.qa{display:flex;flex-direction:column;gap:10px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 18px}
+summary{cursor:pointer;padding:14px 0;font-weight:700;font-size:15px;list-style:none;display:flex;gap:10px}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"+";font-family:var(--mono);color:var(--muted);width:14px;flex:none}
+details[open] summary::before{content:"−"}
+details .ans{padding:0 0 16px 24px;display:flex;flex-direction:column;gap:8px;font-size:14.5px}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;font-size:13px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);padding:5px 12px;border-radius:6px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button:focus-visible{outline:2px solid var(--seq);outline-offset:2px}
+
+ol.tpl{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:8px;max-width:72ch}
+ol.tpl b{font-weight:700}
+.src{font-size:13px;color:var(--muted)}
+.src ul{margin:6px 0 0;padding-left:1.2em}
+
+@media (max-width:760px){
+  .grid2,.terms{grid-template-columns:1fr}
+  .toks{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body data-pagefind-body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">大模型面试八股 · Infra 篇</div>
+  <h1>vLLM：从 PagedAttention 到 V1 引擎与 Model Runner V2</h1>
+  <p class="lede">vLLM 2023 年 6 月以 PagedAttention 起家，到 2026 年 10 月已经发到 v0.32。中间经历了一次整体重写（V1 引擎）、一次执行层重写（Model Runner V2），连最初那批 PagedAttention 的 CUDA kernel 都在 v0.25 删掉了。面试问 vLLM，既会问 PagedAttention 和前缀缓存的原理，也会问 V1 改了什么、调度器怎么分 token、CUDA graph 为什么分段。本文按版本演进把这些串起来。</p>
+  <nav class="toc" aria-label="目录">
+    <a href="#recite">背诵版</a><a href="#evolve">版本演进</a><a href="#arch">V1 架构</a><a href="#paged">PagedAttention</a><a href="#prefix">前缀缓存</a><a href="#sched">调度器</a><a href="#lab">动手试</a><a href="#exec">执行层</a><a href="#dist">分布式与 PD 分离</a><a href="#params">关键参数</a><a href="#code">代码</a><a href="#qa">高频追问</a><a href="#tpl">答题模板</a>
+  </nav>
+</header>
+
+<section id="recite" class="stack">
+  <div class="sec-head"><span class="eyebrow">先给结论</span><h2>30 秒背诵版</h2></div>
+  <div class="recite">
+    <span class="tag">PagedAttention 管显存，前缀缓存省 prefill，统一的 token 预算做调度，CUDA graph 和异步调度压 CPU 开销</span>
+    <p><b>起点</b>：KV cache 按固定大小的块（默认 16 个 token）存放，每条请求用<mark>块表</mark>把逻辑块映射到不连续的物理块，按需分配，浪费只在最后一块；块可以被多条请求共享（引用计数 + 写时复制）。论文里显存有效利用率从 20%–38% 提到 96%，吞吐是当时 FasterTransformer、Orca 的 2 到 4 倍。</p>
+    <p><b>前缀缓存</b>：每个满块按“父块哈希 + 本块 token + 额外键”算哈希，命中就直接复用物理块，空闲块按 LRU 淘汰。只能复用前缀，因为一个 token 的 K、V 依赖它前面所有的 token。V1 默认开启，命中率为 0 时吞吐损失不到 1%。</p>
+    <p><b>V1 引擎</b>（v0.7 试用、v0.8 默认、v0.11 删光 V0）：API server 和 EngineCore 分进程；<mark>调度器不再区分 prefill 和 decode</mark>，每步只决定“每个请求算多少个 token”，在 token 预算内统一分配，chunked prefill、前缀缓存、投机解码都是这个框架下的特例；执行层用 torch.compile 加分段 CUDA graph。</p>
+    <p><b>2026 年</b>：异步调度默认开启（v0.14），CPU 调度下一步和 GPU 执行这一步重叠；Model Runner V2 去掉了 persistent batch 的重排簿记，v0.29 起对所有模型默认；KV cache 卸载发展成 CPU、磁盘、对象存储的多层结构；大规模部署靠 DP + EP、PD 分离和 KV connector。</p>
+  </div>
+</section>
+
+<section id="evolve" class="stack">
+  <div class="sec-head"><span class="eyebrow">演进</span><h2>版本演进：四个阶段</h2></div>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 250" role="img" aria-label="vLLM 版本时间线：2023 年 PagedAttention 起家；2024 年 V0 补齐功能；2025 年 V1 重写并移除 V0；2025 年底到 2026 年 Model Runner V2 与大规模部署">
+        <rect class="b-io" x="40" y="96" width="154" height="44" rx="4"/>
+        <rect class="b-seq" x="194" y="96" width="264" height="44" rx="4"/>
+        <rect class="b-tok" x="458" y="96" width="220" height="44" rx="4"/>
+        <rect class="b-ref" x="678" y="96" width="242" height="44" rx="4"/>
+        <foreignObject x="40" y="96" width="154" height="44"><div class="fo"><span>① 起家</span><span class="fs">2023</span></div></foreignObject>
+        <foreignObject x="194" y="96" width="264" height="44"><div class="fo"><span>② V0 补齐功能</span><span class="fs">2024</span></div></foreignObject>
+        <foreignObject x="458" y="96" width="220" height="44"><div class="fo"><span>③ V1 重写，移除 V0</span><span class="fs">2025.01–2025.10</span></div></foreignObject>
+        <foreignObject x="678" y="96" width="242" height="44"><div class="fo"><span>④ MRV2 与规模化</span><span class="fs">2025.12–2026.10</span></div></foreignObject>
+
+        <line class="gd" x1="40" y1="80" x2="40" y2="96"/><text class="s" x="34" y="74">v0.1</text><text class="s" x="34" y="58">PagedAttention</text>
+        <line class="gd" x1="106" y1="140" x2="106" y2="158"/><text class="s c" x="106" y="172">v0.2</text><text class="s c" x="106" y="188">AWQ</text>
+        <line class="gd" x1="194" y1="80" x2="194" y2="96"/><text class="s c" x="194" y="70">v0.3</text><text class="s c" x="194" y="54">多 LoRA、FP8 KV</text>
+        <line class="gd" x1="238" y1="140" x2="238" y2="158"/><text class="s c" x="238" y="172">v0.4</text><text class="s c" x="238" y="188">自动前缀缓存</text>
+        <line class="gd" x1="304" y1="80" x2="304" y2="96"/><text class="s c" x="304" y="70">v0.5</text><text class="s c" x="304" y="54">FP8、投机解码</text>
+        <line class="gd" x1="370" y1="140" x2="370" y2="158"/><text class="s c" x="370" y="172">v0.6</text><text class="s c" x="370" y="188">多步调度</text>
+        <line class="gd" x1="458" y1="80" x2="458" y2="96"/><text class="s c" x="458" y="70">v0.7</text><text class="s c" x="458" y="54">V1 alpha</text>
+        <line class="gd" x1="502" y1="140" x2="502" y2="158"/><text class="s c" x="502" y="172">v0.8</text><text class="s c" x="502" y="188">V1 默认</text>
+        <line class="gd" x1="546" y1="80" x2="546" y2="96"/><text class="s c" x="546" y="70">v0.9</text><text class="s c" x="546" y="54">EP、DP、NIXL</text>
+        <line class="gd" x1="656" y1="140" x2="656" y2="158"/><text class="s c" x="650" y="172">v0.11</text><text class="s c" x="650" y="188">删光 V0</text>
+        <line class="gd" x1="700" y1="80" x2="700" y2="96"/><text class="s c" x="700" y="70">v0.12</text><text class="s c" x="700" y="54">MRV2 试验</text>
+        <line class="gd" x1="722" y1="140" x2="722" y2="158"/><text class="s c" x="736" y="172">v0.14</text><text class="s c" x="736" y="188">异步调度默认</text>
+        <line class="gd" x1="788" y1="80" x2="788" y2="96"/><text class="s c" x="788" y="70">v0.20</text><text class="s c" x="788" y="54">2-bit KV</text>
+        <line class="gd" x1="854" y1="140" x2="854" y2="158"/><text class="s c" x="854" y="172">v0.25</text><text class="s c" x="854" y="188">删旧 kernel</text>
+        <line class="gd" x1="898" y1="80" x2="898" y2="96"/><text class="s c" x="898" y="70">v0.29</text><text class="s c" x="898" y="54">MRV2 全默认</text>
+        <line class="gd" x1="920" y1="140" x2="920" y2="158"/><text class="s c" x="912" y="210">v0.32（2026.10）</text>
+      </svg>
+    </div>
+    <figcaption>横轴按时间（2023 年 6 月到 2026 年 10 月）。2026 年起大约每两周发一个小版本，版本号涨得很快，所以面试时说清楚“V0、V1、MRV2 三代”比背版本号更有用。</figcaption>
+  </figure>
+  <div class="tbl"><table>
+    <thead><tr><th>版本 · 时间</th><th>关键变化</th></tr></thead>
+    <tbody>
+      <tr><th>v0.1 · 2023.06</th><td>首个正式版，核心是 PagedAttention 和 continuous batching。论文 2023 年 9 月公开，发表于 SOSP 2023</td></tr>
+      <tr><th>v0.2 · 2023.09</th><td>反分词和采样优化（最多快 60%）；初步支持 AWQ 量化；Mistral-7B</td></tr>
+      <tr><th>v0.3 · 2024.01</th><td>实验性的多 LoRA、前缀缓存（手动指定前缀）、FP8 KV cache；DeepSeek MoE</td></tr>
+      <tr><th>v0.4 · 2024.03</th><td><b>自动前缀缓存</b>：逻辑块和物理块之间加一层哈希表（<code>--enable-prefix-caching</code>）；chunked prefill 和投机解码开始开发</td></tr>
+      <tr><th>v0.5 · 2024.06</th><td>FP8 权重量化；OpenAI 视觉 API；投机解码、自动前缀缓存进入可测试状态</td></tr>
+      <tr><th>v0.6 · 2024.09</th><td>吞吐比 v0.5.3 高 2 倍：<b>多步调度</b>（一次调度跑多步 decode）、<b>异步输出处理</b>（构造输出和 GPU 计算重叠，+12%）；chunked prefill 和前缀缓存可以同时开</td></tr>
+      <tr><th>v0.7 · 2025.01</th><td><b>V1 引擎 alpha</b>（<code>VLLM_USE_V1=1</code>），官方博客称吞吐最多是 V0 的 1.7 倍；torch.compile 完整集成；给 RL 框架用的 <code>sleep</code>、<code>wake_up</code></td></tr>
+      <tr><th>v0.8 · 2025.03</th><td><b>V1 默认开启</b>；DeepSeek 专项：FlashMLA、MLA 接入 V1、专家并行（EP）+ 注意力数据并行（DP）、MTP</td></tr>
+      <tr><th>v0.9 · 2025.05</th><td>PyTorch 2.7、CUDA 12.8，Blackwell 优化 kernel；大规模推理的 DP、EP、PD 分离初步支持，集成 NIXL 传 KV cache</td></tr>
+      <tr><th>v0.10 · 2025.07</th><td>开始清理 V0 代码；混合 SSM/注意力模型上 V1；实验性<b>异步调度</b>（<code>--async-scheduling</code>）。此前一个月（2025 年 6 月）合入了混合内存分配器（Hybrid Memory Allocator），一个模型里全注意力层、滑动窗口层、Mamba 层的缓存可以分组管理</td></tr>
+      <tr><th>v0.11 · 2025.10</th><td><b>V0 全部删除</b>，V1 成为唯一引擎；CUDA graph 默认改为 <code>FULL_AND_PIECEWISE</code>；支持 Qwen3-Next、DeepSeek-V3.2</td></tr>
+      <tr><th>v0.12 · 2025.12</th><td><b>Model Runner V2（实验）</b>：去掉 persistent batch 的重排簿记、块表常驻 GPU、Triton 采样器；为长序列 prefill 准备的 Prefill Context Parallel</td></tr>
+      <tr><th>v0.14 · 2026.01</th><td><b>异步调度默认开启</b>；gRPC 入口；<code>--max-model-len auto</code> 按显存自动定上下文长度</td></tr>
+      <tr><th>v0.15–v0.19 · 2026.01–04</th><td>Mamba/混合模型的前缀缓存；异步调度 + 流水线并行（端到端吞吐 +30.8%）；FlashAttention 4；Qwen3.5、Gemma 4；通用的 CPU KV cache 卸载；双 batch 重叠（DBO）推广到一般模型</td></tr>
+      <tr><th>v0.20 · 2026.04</th><td>CUDA 13、PyTorch 2.11；DeepSeek V4 初步支持；TurboQuant 2-bit KV cache（容量 4 倍）；实验性 vLLM IR</td></tr>
+      <tr><th>v0.21–v0.24 · 2026.05–06</th><td>KV 卸载接入混合内存分配器，发展成多层卸载框架（文件系统、对象存储作为二级层）；实验性 Rust 前端；MRV2 先后对 Qwen3、Llama、Mistral 稠密模型默认开启</td></tr>
+      <tr><th>v0.25 · 2026.07</th><td><b>MRV2 对所有稠密模型默认</b>；<b>删除最初的 PagedAttention kernel</b>（<code>paged_attention_v1/v2.cu</code>）；Transformers 后端和原生实现一样快</td></tr>
+      <tr><th>v0.28 · 2026.08</th><td><code>max_num_batched_tokens</code> 默认值从 8192 提到 16384；KV 卸载支持磁盘；Mamba 模型默认开前缀缓存</td></tr>
+      <tr><th>v0.29 · 2026.09</th><td><b>MRV2 对所有模型默认</b>（少数 ROCm 模型和特性除外）</td></tr>
+      <tr><th>v0.30–v0.32 · 2026.09–10</th><td>快速重启（<code>vllm preload</code> 让量化切分后的权重常驻显存）；稀疏 MLA 的 KV 溢出到主机内存（HiSparse）；NVFP4 KV cache 覆盖更多架构，GLM-5.x 在 SM100 上默认用 FP8 KV cache</td></tr>
+    </tbody>
+  </table></div>
+  <div class="grid2">
+    <div class="pt"><h3>为什么要重写成 V1 <span class="chip warn">常被追问</span></h3>
+      <p>V0 功能一个个加上去，prefill 和 decode 两套调度逻辑、多步调度、各种特性的组合互相牵制，代码越来越难改。更要紧的是 GPU 越来越快，Python 端的调度、准备输入、处理输出成了瓶颈。V1 的目标是两条：架构简单（一个统一的调度抽象），CPU 开销接近零（分进程、增量更新、缓存输入张量）。</p></div>
+    <div class="pt"><h3>“删除 PagedAttention”是什么意思</h3>
+      <p>v0.25 删掉的是 vLLM 最初手写的 <code>paged_attention_v1/v2</code> CUDA kernel，不是分块管理 KV cache 的思想。现在 FlashAttention、FlashInfer、FlashMLA 等注意力后端都原生支持按块表读写分页的 KV cache，V1 里只剩这些后端在用，旧 kernel 就没有存在的必要了。块、块表、按需分配、前缀缓存都还在。</p></div>
+  </div>
+</section>
+
+<section id="arch" class="stack">
+  <div class="sec-head"><span class="eyebrow">架构</span><h2>V1 架构：一个请求经过哪些组件</h2></div>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 300" role="img" aria-label="vLLM V1 架构：客户端请求进入 API server 进程，负责 OpenAI 兼容接口、分词、反分词和多模态预处理；通过 ZMQ 发给 EngineCore 进程，里面是调度器和 KV cache manager；调度结果发给每张 GPU 上的 worker，由 model runner 准备输入、调用注意力后端和采样">
+        <rect class="b-io" x="16" y="128" width="80" height="48" rx="6"/>
+        <foreignObject x="16" y="128" width="80" height="48"><div class="fo">客户端</div></foreignObject>
+        <line class="ln arr" x1="96" y1="152" x2="124" y2="152"/>
+
+        <rect class="panel" x="126" y="30" width="230" height="250" rx="8"/>
+        <text class="h" x="140" y="22">进程 1：API server</text>
+        <rect class="b-io" x="142" y="50" width="198" height="50" rx="6"/>
+        <foreignObject x="142" y="50" width="198" height="50"><div class="fo"><span>OpenAI / Anthropic 兼容接口</span><span class="fs">也有 gRPC 入口</span></div></foreignObject>
+        <rect class="b-seq" x="142" y="122" width="198" height="60" rx="6"/>
+        <foreignObject x="142" y="122" width="198" height="60"><div class="fo"><span>AsyncLLM</span><span class="fs">分词、反分词、流式输出、停止条件</span></div></foreignObject>
+        <rect class="b-io" x="142" y="204" width="198" height="56" rx="6"/>
+        <foreignObject x="142" y="204" width="198" height="56"><div class="fo"><span>多模态预处理</span><span class="fs">图像处理结果缓存</span></div></foreignObject>
+
+        <line class="ln arr" x1="356" y1="152" x2="392" y2="152"/>
+        <text class="s c" x="374" y="142">ZMQ</text>
+
+        <rect class="panel" x="394" y="30" width="260" height="250" rx="8"/>
+        <text class="h" x="408" y="22">进程 2：EngineCore 循环</text>
+        <rect class="b-tok" x="410" y="50" width="228" height="60" rx="6"/>
+        <foreignObject x="410" y="50" width="228" height="60"><div class="fo"><span>Scheduler</span><span class="fs">在 token 预算内决定每个请求本步算几个 token</span></div></foreignObject>
+        <rect class="b-tok" x="410" y="126" width="228" height="70" rx="6"/>
+        <foreignObject x="410" y="126" width="228" height="70"><div class="fo"><span>KV cache manager</span><span class="fs">块池、空闲队列（LRU）、前缀哈希表、引用计数；混合模型按组管理</span></div></foreignObject>
+        <rect class="b-io" x="410" y="212" width="228" height="52" rx="6"/>
+        <foreignObject x="410" y="212" width="228" height="52"><div class="fo fs"><span>输出：本步的 token 分配 + 块表的增量</span></div></foreignObject>
+
+        <line class="ln arr" x1="654" y1="152" x2="690" y2="152"/>
+
+        <rect class="panel" x="692" y="30" width="252" height="250" rx="8"/>
+        <text class="h" x="706" y="22">GPU worker（每张卡一个进程）</text>
+        <rect class="b-seq" x="708" y="50" width="220" height="60" rx="6"/>
+        <foreignObject x="708" y="50" width="220" height="60"><div class="fo"><span>Model Runner</span><span class="fs">准备输入和块表，选 CUDA graph 执行</span></div></foreignObject>
+        <rect class="b-seq" x="708" y="126" width="220" height="70" rx="6"/>
+        <foreignObject x="708" y="126" width="220" height="70"><div class="fo"><span>注意力后端</span><span class="fs">FlashAttention / FlashInfer / FlashMLA，按块表读写分页 KV</span></div></foreignObject>
+        <rect class="b-seq" x="708" y="212" width="220" height="52" rx="6"/>
+        <foreignObject x="708" y="212" width="220" height="52"><div class="fo"><span>采样器</span><span class="fs">投机解码时还要做验证</span></div></foreignObject>
+      </svg>
+    </div>
+    <figcaption>CPU 上的重活（分词、反分词、流式输出、多模态预处理）放在 API server 进程，EngineCore 只做调度和 KV 块管理，GPU 一直有活干。worker 缓存请求状态，每步只收增量，所以单卡和多卡是同一套逻辑。</figcaption>
+  </figure>
+  <p>一个 engine step 做的事：调度器从“正在跑”的请求开始，按顺序给每个请求分 token（decode 请求 1 个，投机解码时 1 + 草稿数，没 prefill 完的请求分一段），预算有剩再从等待队列接新请求；KV cache manager 给它们分块、查前缀缓存；worker 用块表准备输入，跑一次前向和采样；新 token 回到 API server 反分词、流式返回。</p>
+</section>
+
+<section id="paged" class="stack">
+  <div class="sec-head"><span class="eyebrow">内存管理</span><h2>PagedAttention：像操作系统分页一样管 KV cache</h2></div>
+  <p>早期的推理系统给每条请求预留一段<b>连续</b>显存，大小按最大生成长度算。问题有三个：生成多长事先不知道，预留的大部分用不上（预留浪费）；没写满的部分别人也用不了（内部碎片）；请求大小不一，释放后留下的空洞拼不起来（外部碎片）。vLLM 论文测得，当时的系统（FasterTransformer、Orca）KV cache 显存里只有 20.4% 到 38.2% 真正存了 token。PagedAttention 借鉴操作系统的虚拟内存和分页，是 vLLM 的起点。</p>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 320" role="img" aria-label="PagedAttention：请求 A 和 B 的逻辑块通过各自的块表映射到不连续的物理块；两者相同的系统提示共享物理块 7 和 2，引用计数为 2；A 的第三块映射到物理块 5，B 的第三块映射到物理块 9">
+        <text class="h" x="16" y="22">逻辑块：每条请求看起来是连续的</text>
+        <text class="h" x="330" y="22">块表</text>
+        <text class="h" x="560" y="22">物理块：显存里不连续，按需分配</text>
+        <text class="s" x="16" y="48">请求 A</text>
+        <rect class="b-ref" x="16" y="56" width="250" height="30" rx="4"/><foreignObject x="16" y="56" width="250" height="30"><div class="fo">块 0：系统提示 token 1–16</div></foreignObject>
+        <rect class="b-ref" x="16" y="92" width="250" height="30" rx="4"/><foreignObject x="16" y="92" width="250" height="30"><div class="fo">块 1：系统提示 token 17–32</div></foreignObject>
+        <rect class="b-seq" x="16" y="128" width="250" height="30" rx="4"/><foreignObject x="16" y="128" width="250" height="30"><div class="fo">块 2：A 的问题，写了 9 个（未满）</div></foreignObject>
+        <text class="s" x="16" y="192">请求 B</text>
+        <rect class="b-ref" x="16" y="200" width="250" height="30" rx="4"/><foreignObject x="16" y="200" width="250" height="30"><div class="fo">块 0：系统提示 token 1–16</div></foreignObject>
+        <rect class="b-ref" x="16" y="236" width="250" height="30" rx="4"/><foreignObject x="16" y="236" width="250" height="30"><div class="fo">块 1：系统提示 token 17–32</div></foreignObject>
+        <rect class="b-tok" x="16" y="272" width="250" height="30" rx="4"/><foreignObject x="16" y="272" width="250" height="30"><div class="fo">块 2：B 的问题，写了 5 个（未满）</div></foreignObject>
+
+        <line class="ln arr" x1="266" y1="107" x2="328" y2="107"/>
+        <line class="ln arr" x1="266" y1="251" x2="328" y2="251"/>
+        <rect class="b-io" x="330" y="56" width="170" height="102" rx="6"/>
+        <foreignObject x="330" y="56" width="170" height="102"><div class="fo"><span class="mono">A: 0 → #7</span><span class="mono">1 → #2</span><span class="mono">2 → #5</span></div></foreignObject>
+        <rect class="b-io" x="330" y="200" width="170" height="102" rx="6"/>
+        <foreignObject x="330" y="200" width="170" height="102"><div class="fo"><span class="mono">B: 0 → #7</span><span class="mono">1 → #2</span><span class="mono">2 → #9</span></div></foreignObject>
+        <line class="ln arr" x1="500" y1="107" x2="556" y2="140"/>
+        <line class="ln arr" x1="500" y1="251" x2="556" y2="210"/>
+
+        <rect class="b-io" x="560" y="90" width="56" height="48" rx="4"/><foreignObject x="560" y="90" width="56" height="48"><div class="fo fs">#0</div></foreignObject>
+        <rect class="b-io" x="624" y="90" width="56" height="48" rx="4"/><foreignObject x="624" y="90" width="56" height="48"><div class="fo fs">#1</div></foreignObject>
+        <rect class="b-ref" x="688" y="90" width="56" height="48" rx="4"/><foreignObject x="688" y="90" width="56" height="48"><div class="fo"><span>#2</span><span class="fs">引用 2</span></div></foreignObject>
+        <rect class="b-io" x="752" y="90" width="56" height="48" rx="4"/><foreignObject x="752" y="90" width="56" height="48"><div class="fo fs">#3</div></foreignObject>
+        <rect class="b-io" x="816" y="90" width="56" height="48" rx="4"/><foreignObject x="816" y="90" width="56" height="48"><div class="fo fs">#4</div></foreignObject>
+        <rect class="b-seq" x="880" y="90" width="56" height="48" rx="4"/><foreignObject x="880" y="90" width="56" height="48"><div class="fo"><span>#5</span><span class="fs">A</span></div></foreignObject>
+        <rect class="b-io" x="560" y="186" width="56" height="48" rx="4"/><foreignObject x="560" y="186" width="56" height="48"><div class="fo fs">#6</div></foreignObject>
+        <rect class="b-ref" x="624" y="186" width="56" height="48" rx="4"/><foreignObject x="624" y="186" width="56" height="48"><div class="fo"><span>#7</span><span class="fs">引用 2</span></div></foreignObject>
+        <rect class="b-io" x="688" y="186" width="56" height="48" rx="4"/><foreignObject x="688" y="186" width="56" height="48"><div class="fo fs">#8</div></foreignObject>
+        <rect class="b-tok" x="752" y="186" width="56" height="48" rx="4"/><foreignObject x="752" y="186" width="56" height="48"><div class="fo"><span>#9</span><span class="fs">B</span></div></foreignObject>
+        <rect class="b-io" x="816" y="186" width="56" height="48" rx="4"/><foreignObject x="816" y="186" width="56" height="48"><div class="fo fs">#10</div></foreignObject>
+        <rect class="b-io" x="880" y="186" width="56" height="48" rx="4"/><foreignObject x="880" y="186" width="56" height="48"><div class="fo fs">#11</div></foreignObject>
+        <foreignObject x="560" y="250" width="384" height="56"><div class="fo fs"><span>白色是空闲块，任何请求都能拿去用</span><span>橙色被两条请求共享，A 要改写时先复制一份（写时复制）</span></div></foreignObject>
+      </svg>
+    </div>
+    <figcaption>块大小这里取 16 个 token（vLLM 的默认值）。浪费只发生在每条请求的最后一个块里，最多 15 个 token。</figcaption>
+  </figure>
+  <div class="grid2">
+    <div class="pt"><h3>它解决了什么</h3>
+      <ul>
+        <li><b>按需分配</b>：写满一块再申请下一块，不用按最大长度预留。</li>
+        <li><b>几乎没有碎片</b>：块大小固定，任何空闲块都能给任何请求用；浪费只在最后一块。论文里 vLLM 的有效利用率是 96.3%。</li>
+        <li><b>共享</b>：并行采样、beam search、相同系统提示的请求共享物理块，靠引用计数和写时复制管理。</li>
+      </ul>
+      <p>效果是同样的显存能放更多请求，论文报告吞吐比 FasterTransformer、Orca 高 2 到 4 倍，序列越长、模型越大越明显。</p></div>
+    <div class="pt"><h3>代价 <span class="chip warn">常被追问</span></h3>
+      <ul>
+        <li>注意力 kernel 要先查块表，再去不连续的地址读 K、V，不能直接用要求连续内存的普通 kernel，需要专门写。</li>
+        <li>块大小是个权衡：太小，块表大、访存零碎，kernel 效率低；太大，最后一块的浪费变多，共享粒度也变粗。</li>
+        <li>显存不够时要抢占：把某些请求的块换出到 CPU（swap），或者直接丢掉、之后重新 prefill（recompute）。</li>
+      </ul></div>
+  </div>
+</section>
+
+
+<section id="prefix" class="stack">
+  <div class="sec-head"><span class="eyebrow">复用</span><h2>前缀缓存：相同前缀的 KV 只算一次</h2></div>
+  <p>多条请求开头一样（同一个系统提示、同一份长文档、多轮对话的历史、Agent 每轮都带的工具定义），这一段的 KV cache 完全相同，可以只算一次，后来的请求直接跳过这段 prefill。v0.3 先做了需要手动指定前缀的版本，v0.4 换成自动前缀缓存，V1 里默认开启。</p>
+  <div class="grid2">
+    <div class="pt"><h3>V1 的实现 <span class="chip seq">块哈希</span></h3>
+      <ul>
+        <li><b>哈希</b>：每个满块的键 = 父块哈希 + 本块的 token + 额外键（LoRA ID、多模态输入的哈希、cache salt）。带父块哈希，一个块的键就隐含了它前面的全部内容。默认用 SHA-256，也可以选 xxHash。</li>
+        <li><b>只缓存满块</b>：没写满的最后一块不进缓存。</li>
+        <li><b>空闲队列</b>：所有块启动时一次性建好（块池），引用计数为 0 的块挂在一个双向链表上，淘汰时从队头拿最久没用的。请求结束时它的块按<b>倒序</b>放回队尾：最后一块包含的前缀最长，最不可能被复用，最先被淘汰。</li>
+        <li><b>开销</b>：V1 博客称命中率为 0 时吞吐损失也不到 1%，所以默认开启。</li>
+      </ul></div>
+    <div class="pt"><h3>SGLang 的做法 <span class="chip tok">RadixAttention</span></h3>
+      <p>把所有缓存过的 token 序列组织成一棵基数树，新请求沿着树做最长前缀匹配，叶子按 LRU 淘汰；调度时优先处理能命中长前缀的请求，提高命中率。和 vLLM 的块哈希相比，匹配粒度是 token 而不是块。</p></div>
+  </div>
+  <div class="pt"><h3>为什么只能复用前缀 <span class="chip warn">关键</span></h3>
+    <p>第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span> 个 token 在第 2 层及以后的 K、V，依赖前面所有 token（第 1 层之后每个位置都已经混入了前文信息）；它的 K 还带着 RoPE 的绝对位置。所以两段文本只有从第一个 token 开始完全一样，KV 才相同。开头差一个 token，后面全部不能复用。</p>
+    <p>工程上的推论：固定内容放前面，变化的内容放后面；不要在系统提示里放时间戳；多轮对话和 Agent 只往后追加、不改前面的历史。各家 API 的 prompt caching 也是同一个原理。多租户场景下可以给请求加 cache salt，只有 salt 相同的请求才能共享缓存，防止通过命中时间推测别人的提示。</p></div>
+  <p class="note">KV cache 本身的大小和压缩方法见 <a href="/interview/infra/kv-cache/" target="_top">KV Cache 篇</a>；Coding Agent 如何围绕前缀缓存设计上下文，见 <a href="/interview/agent/coding-agents/" target="_top">Coding Agent 篇</a>。</p>
+</section>
+
+<section id="sched" class="stack">
+  <div class="sec-head"><span class="eyebrow">调度</span><h2>调度器：不分 prefill 和 decode，只分 token</h2></div>
+  <p>V0 的调度器把 prefill 和 decode 分成两种步骤，chunked prefill、前缀缓存、投机解码各自打补丁。V1 换了一个抽象：<mark>每个请求记录“已经算了多少 token”和“一共有多少 token”，每步调度就是一个字典 <code>{请求 ID: 本步算几个 token}</code></mark>，总数不超过 token 预算 <code>max_num_batched_tokens</code>。</p>
+  <div class="grid2">
+    <div class="pt"><h3>几种情况都是这个框架的特例</h3>
+      <ul>
+        <li>decode：差 1 个 token，分 1 个。</li>
+        <li>prefill：差整段 prompt，预算够就一次分完，不够就分一段，下一步接着分，这就是 chunked prefill。</li>
+        <li>前缀缓存命中：“已经算了”的数直接从命中长度开始。</li>
+        <li>投机解码：分 1 + 草稿 token 数，一次验证。</li>
+      </ul></div>
+    <div class="pt"><h3>顺序和抢占</h3>
+      <ul>
+        <li>先排“正在跑”的请求，再从等待队列按到达顺序接新请求，同时受 <code>max_num_seqs</code> 限制。</li>
+        <li>每步都重新调度，请求结束立刻腾位置，新请求立刻加入：continuous batching（Orca 提出的迭代级调度）。</li>
+        <li>KV 块不够时，从正在跑的请求里抢占最后加入的，释放它的块，之后重新 prefill（V1 默认用重算，不再换出到 CPU）。</li>
+      </ul></div>
+  </div>
+  <h3>手算一步步怎么分</h3>
+  <p>预算 16384（v0.28 起的默认值），已有 3 条请求在 decode；新来两条请求，A 的 prompt 20000 个 token，B 的 prompt 3000 个 token：</p>
+  <div class="tbl"><table style="min-width:600px">
+    <thead><tr><th>步</th><th class="num">3 条 decode</th><th class="num">A</th><th class="num">B</th><th class="num">合计</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><th>1</th><td class="num">3</td><td class="num">16381</td><td class="num">0</td><td class="num">16384</td><td>A 只分到预算剩下的部分，还差 3619；预算用完，B 等待</td></tr>
+      <tr><th>2</th><td class="num">3</td><td class="num">3619</td><td class="num">3000</td><td class="num">6622</td><td>A、B 都在这一步算完 prompt，并各自采样出第一个 token</td></tr>
+      <tr><th>3</th><td class="num">3</td><td class="num">1</td><td class="num">1</td><td class="num">5</td><td>5 条请求都在 decode</td></tr>
+    </tbody>
+  </table></div>
+  <p>decode 请求每一步都被排上，不会被长 prompt 卡住，只是第 1 步因为跟 16381 个 prefill token 一起算，会比平时慢。预算越大，prefill 越快（首 token 延迟低），但同一步的 decode 被拖得越久（出字更卡）；预算越小反过来。</p>
+</section>
+
+<section id="lab" class="stack">
+  <div class="sec-head"><span class="eyebrow">交互实验</span><h2>动手试：调度器怎么分 token 预算</h2></div>
+  <div class="lab">
+    <div class="row">
+      <label class="fld">token 预算<input type="number" id="sT" value="16384" min="16" step="1024"></label>
+      <label class="fld">最多并发条数<input type="number" id="sS" value="256" min="1" step="1"></label>
+      <label class="fld">已在 decode 的条数<input type="number" id="sD" value="3" min="0" step="1"></label>
+      <label class="fld">新请求各生成几个 token<input type="number" id="sO" value="4" min="1" step="1"></label>
+      <label class="fld" style="min-width:220px">新请求的 prompt 长度（逗号分隔）<input type="text" id="sP" value="20000, 3000" style="font:inherit;font-family:var(--mono);font-size:13px;width:220px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)"></label>
+    </div>
+    <div class="seg" id="sPre" role="group" aria-label="预设"></div>
+    <div class="tbl"><table style="min-width:600px">
+      <thead id="sH"></thead>
+      <tbody id="sB"></tbody>
+    </table></div>
+    <div class="verdict" id="sMsg" aria-live="polite"></div>
+    <p class="note" style="max-width:none">简化版：不考虑 KV 块不够时的抢占、前缀缓存命中和投机解码；新请求在 prompt 算完的那一步采样出第一个 token，之后每步 decode 一个，生成够数量就结束；已有的 decode 请求一直不结束。最多模拟 12 步。</p>
+  </div>
+</section>
+
+<section id="exec" class="stack">
+  <div class="sec-head"><span class="eyebrow">执行层</span><h2>执行层：CUDA graph、异步调度、Model Runner V2</h2></div>
+  <p>decode 一步只有一个 token，GPU 上的计算可能只要几毫秒，Python 端发起几百个 kernel、准备输入、调度的开销就显得很大。vLLM 执行层的演进基本都在压这部分 CPU 开销。</p>
+  <div class="terms">
+    <div class="term"><span class="k">CUDA graph：一次录制，反复回放</span>
+      <p>把一次前向里的所有 kernel 录成一张图，之后一次提交整张图，省掉逐个启动 kernel 的开销。限制是形状必须固定，所以按若干个 batch 大小分别录制，运行时把 batch 补齐到最近的一档。</p></div>
+    <div class="term"><span class="k">分段 CUDA graph（piecewise）</span>
+      <p>注意力的输入形状随每条请求的长度变化，而且 prefill 和 decode 混在一起，很难整张录制。V1 用 torch.compile 把模型切成几段，注意力在段与段之间按普通方式执行，其余部分录成图，这样所有注意力后端都能用。</p></div>
+    <div class="term"><span class="k"><code>FULL_AND_PIECEWISE</code>（v0.11 起默认）</span>
+      <p>纯 decode 的 batch（每个请求 1 个 token，投机解码时是 1 + 草稿数）形状规整，录整张图，连注意力也包进去；混合了 prefill 的 batch 走分段图。代价是录制时间和显存都更多。PD 分离里的 decode 实例可以用 <code>FULL_DECODE_ONLY</code>，省掉分段图的显存。</p></div>
+    <div class="term"><span class="k">异步调度（v0.14 起默认）</span>
+      <p>以前是“调度 → GPU 执行 → 处理输出 → 再调度”串行。异步调度让 CPU 在 GPU 执行第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> 步时就调度第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">n+1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span> 步，GPU 不再等 CPU。难点是第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">n+1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span> 步要用到第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> 步还没采样出来的 token，所以要在 GPU 上直接衔接；v0.19 起和投机解码也能零气泡重叠。</p></div>
+  </div>
+  <div class="grid2">
+    <div class="pt"><h3>Persistent batch 和它的问题</h3>
+      <p>V1 一开始的 model runner 把输入张量常驻并每步只改差异（用 NumPy 而不是 Python 循环），省掉了每步重建输入的开销。但请求进进出出时要在这个 batch 里重排、压实，簿记逻辑越来越复杂，和新特性组合时容易出错。</p></div>
+    <div class="pt"><h3>Model Runner V2 <span class="chip seq">2026 的主线</span></h3>
+      <p>v0.12 试验，v0.22 起对 Qwen3 稠密模型默认，v0.25 覆盖所有稠密模型，v0.29 覆盖所有模型。改动：去掉 persistent batch 的重排，块表常驻 GPU（<code>max_model_len</code> 很大、KV 分组很多时扩展性更好），Triton 写的采样器，更简单的 DP 和 CUDA graph 实现。之后的流水线并行、投机解码、DBO 等新特性都在 MRV2 上做。</p></div>
+  </div>
+</section>
+
+<section id="dist" class="stack">
+  <div class="sec-head"><span class="eyebrow">规模化</span><h2>分布式与 PD 分离</h2></div>
+  <div class="tbl"><table>
+    <thead><tr><th>手段</th><th>切的是什么</th><th>什么时候用</th></tr></thead>
+    <tbody>
+      <tr><th>张量并行（TP）</th><td>每层的权重按头或列切到多张卡，每层要做 all-reduce</td><td>单机内，模型一张卡放不下</td></tr>
+      <tr><th>流水线并行（PP）</th><td>按层切到多张卡</td><td>跨机，带宽不够做 TP；v0.16 起和异步调度一起用，吞吐提升约 30%</td></tr>
+      <tr><th>数据并行（DP）</th><td>整个模型复制多份，各自处理不同的请求</td><td>吞吐优先；MoE 模型里常和 EP 搭配：注意力做 DP，专家做 EP</td></tr>
+      <tr><th>专家并行（EP）</th><td>MoE 的专家分到不同的卡，token 通过 all-to-all 发给对应专家</td><td>DeepSeek、Kimi 这类大 MoE；有 DeepEP、EPLB（专家负载均衡）、弹性 EP</td></tr>
+      <tr><th>上下文并行（DCP、PCP）</th><td>沿序列维度切 KV cache（decode）或切 prompt（prefill）</td><td>超长上下文，单卡放不下一条请求的 KV</td></tr>
+    </tbody>
+  </table></div>
+  <div class="grid2">
+    <div class="pt"><h3>PD 分离和 KV connector</h3>
+      <p>prefill 是计算瓶颈、决定首 token 延迟，decode 是访存瓶颈、决定每 token 延迟，放在一起会互相干扰，并行策略也没法分别调。PD 分离把两者放在不同的实例上：prefill 实例算完，把 KV cache 通过网络传给 decode 实例。vLLM 用 KV connector 接口抽象这一步，后端可以是 NIXL（RDMA）、LMCache、Mooncake 等。</p></div>
+    <div class="pt"><h3>KV cache 卸载：从一层到多层</h3>
+      <p>GPU 放不下的 KV 块，先存到 CPU 内存（v0.19 的通用 CPU 卸载），再往下是本地文件系统、磁盘、对象存储（v0.22 到 v0.28 的多层卸载框架）。被抢占或被淘汰的前缀，下次命中时从下层读回来，比重新 prefill 便宜。卸载策略可以只存经常被复用的块。</p></div>
+  </div>
+  <p class="note">混合内存分配器：Gemma 3 这类模型有全注意力层和滑动窗口层，Qwen3-Next、Qwen3.5 有全注意力层和线性注意力层，每类层需要的缓存不一样（滑动窗口层只需保留窗口内的块，线性注意力层是固定大小的状态）。V1 把同类的层分成一组，各组用各自的管理策略，但从同一个块池里分配。</p>
+</section>
+
+<section id="params" class="stack">
+  <div class="sec-head"><span class="eyebrow">调参</span><h2>关键参数和 KV cache 的大小怎么定</h2></div>
+  <div class="tbl"><table>
+    <thead><tr><th>参数</th><th>默认</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><th><code>gpu_memory_utilization</code></th><td>0.9</td><td>vLLM 实例最多用多少比例的显存，权重、激活、CUDA graph、KV cache 都在里面</td></tr>
+      <tr><th><code>max_num_batched_tokens</code></th><td>16384（v0.28 前是 8192）</td><td>每步的 token 预算。大了首 token 快、出字卡；小了反过来</td></tr>
+      <tr><th><code>max_num_seqs</code></th><td>依版本和硬件而定</td><td>一步最多同时处理多少条请求</td></tr>
+      <tr><th><code>max_model_len</code></th><td>模型配置的上限</td><td>单条请求的最大长度；v0.14 起可以设成 <code>auto</code>，按显存自动定</td></tr>
+      <tr><th><code>block_size</code></th><td>16</td><td>每个 KV 块多少个 token</td></tr>
+      <tr><th><code>kv_cache_dtype</code></th><td>auto（跟模型一致）</td><td>设成 <code>fp8</code> 可以让 KV cache 减半</td></tr>
+      <tr><th><code>enable_prefix_caching</code></th><td>V1 默认开</td><td>自动前缀缓存</td></tr>
+      <tr><th><code>tensor_parallel_size</code> 等</th><td>1</td><td>TP、PP、DP、EP 的规模</td></tr>
+    </tbody>
+  </table></div>
+  <p>KV cache 能分到多少显存，是启动时<b>实测</b>出来的：先加载权重，再用 <code>max_num_batched_tokens</code> 个 token 跑一次假前向，记下激活的峰值，再算上 CUDA graph 要占的显存，剩下的就是 KV cache：</p>
+  <div class="tex-d"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>M</mi><mtext>KV</mtext></msub><mo>=</mo><mi>U</mi><mo>⋅</mo><msub><mi>M</mi><mtext>GPU</mtext></msub><mo>−</mo><msub><mi>M</mi><mtext>权重</mtext></msub><mo>−</mo><msub><mi>M</mi><mtext>激活峰值</mtext></msub><mo>−</mo><msub><mi>M</mi><mtext>CUDA graph</mtext></msub><mo>−</mo><msub><mi>M</mi><mtext>其他</mtext></msub><mo separator="true">,</mo><mspace width="2em"/><msub><mi>N</mi><mtext>块</mtext></msub><mo>=</mo><mo fence="false" stretchy="true" minsize="1.8em" maxsize="1.8em">⌊</mo><mfrac><msub><mi>M</mi><mtext>KV</mtext></msub><mrow><mtext>block_size</mtext><mo>×</mo><mtext>每 token 字节数</mtext></mrow></mfrac><mo fence="false" stretchy="true" minsize="1.8em" maxsize="1.8em">⌋</mo></mrow><annotation encoding="application/x-tex">M_{\text{KV}}=U\cdot M_{\text{GPU}}-M_{\text{权重}}-M_{\text{激活峰值}}-M_{\text{CUDA graph}}-M_{\text{其他}},\qquad N_{\text{块}}=\Big\lfloor\frac{M_{\text{KV}}}{\text{block\_size}\times\text{每 token 字节数}}\Big\rfloor</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">KV</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">U</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">GPU</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">权重</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">激活峰值</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">CUDA graph</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">其他</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">块</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3563em;vertical-align:-0.996em;"></span><span class="mord"><span class="delimsizing size2">⌊</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3603em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord text"><span class="mord">block_size</span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord text"><span class="mord cjk_fallback">每</span><span class="mord"> token </span><span class="mord cjk_fallback">字节数</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">KV</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.996em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord"><span class="delimsizing size2">⌋</span></span></span></span></span></span></div>
+  <p>启动日志里会打印能放下多少个 token，以及按 <code>max_model_len</code> 算最多能并发多少条。按 KV Cache 篇里的算法，Llama-3.1-8B 在一张 H100 上，KV cache 大约有 50 GiB 出头，约 40 万个 token。</p>
+</section>
+
+<section id="code" class="stack">
+  <div class="sec-head"><span class="eyebrow">手撕</span><h2>代码：用法，以及一个带前缀缓存的块管理器</h2></div>
+<pre><code><span class="cm"># 离线推理</span>
+from vllm import LLM, SamplingParams
+llm = LLM(model="Qwen/Qwen2.5-7B-Instruct", gpu_memory_utilization=0.9,
+          max_model_len=32768, kv_cache_dtype="fp8")
+outs = llm.generate(["介绍一下 PagedAttention"], SamplingParams(temperature=0.7, max_tokens=256))
+
+<span class="cm"># 在线服务（OpenAI 兼容接口）</span>
+<span class="cm"># vllm serve Qwen/Qwen2.5-7B-Instruct --tensor-parallel-size 2 --max-num-batched-tokens 16384</span></code></pre>
+<pre><code><span class="cm"># 简化的块管理器：块池 + 引用计数 + 前缀哈希 + LRU 空闲队列</span>
+from collections import OrderedDict
+
+class BlockManager:
+    def __init__(self, num_blocks, block_size=16):
+        self.bs = block_size
+        self.ref = [0] * num_blocks
+        self.hash_of = [None] * num_blocks
+        self.free = OrderedDict((i, None) for i in range(num_blocks))   <span class="cm"># 队头最久没用</span>
+        self.cached = {}                                                <span class="cm"># 哈希 -&gt; 物理块</span>
+
+    def _take_free(self):
+        b, _ = self.free.popitem(last=False)          <span class="cm"># 淘汰最久没用的块</span>
+        if self.hash_of[b] is not None:               <span class="cm"># 它若还挂着缓存，摘掉</span>
+            del self.cached[self.hash_of[b]]
+            self.hash_of[b] = None
+        return b
+
+    def allocate(self, tokens):
+        table, parent = [], None
+        for i in range(0, len(tokens), self.bs):
+            chunk = tuple(tokens[i:i + self.bs])
+            full = len(chunk) == self.bs
+            h = hash((parent, chunk)) if full else None   <span class="cm"># 只有满块参与前缀缓存</span>
+            if h is not None and h in self.cached:        <span class="cm"># 命中：复用物理块</span>
+                b = self.cached[h]
+                self.free.pop(b, None)                    <span class="cm"># 正在被用，移出空闲队列</span>
+            else:
+                b = self._take_free()
+                if h is not None:
+                    self.cached[h], self.hash_of[b] = b, h
+            self.ref[b] += 1
+            table.append(b)
+            parent = h
+        return table                                      <span class="cm"># 块表：逻辑块 i -&gt; 物理块 table[i]</span>
+
+    def release(self, table):
+        for b in reversed(table):                         <span class="cm"># 倒序放回：长前缀的块先被淘汰</span>
+            self.ref[b] -= 1
+            if self.ref[b] == 0:
+                self.free[b] = None                       <span class="cm"># 放到队尾，内容和哈希都保留，还能被命中</span></code></pre>
+  <p class="note">和真实实现的差别：真实实现边生成边追加块（这里一次性分配）；请求还在写的最后一块不会被别人共享，写满后才计算哈希；额外键里还有 LoRA、多模态、cache salt；哈希用 SHA-256 而不是 Python 的 <code>hash</code>；空闲块不够时由调度器抢占请求，而不是直接报错。</p>
+</section>
+
+<section id="qa" class="stack">
+  <div class="sec-head"><span class="eyebrow">自测</span><h2>高频追问</h2></div>
+  <div class="tools"><button type="button" id="openAll">全部展开</button><button type="button" id="closeAll">全部收起</button></div>
+  <div class="qa">
+    <details><summary>PagedAttention 解决了什么问题？有什么代价？</summary><div class="ans">
+      <p>解决 KV cache 的显存浪费：按最大长度连续预留导致的预留浪费、内部碎片和外部碎片。做法是把 KV cache 切成固定大小的块（默认 16 个 token），每条请求用块表把逻辑块映射到不连续的物理块，按需分配，浪费只在最后一块；还能通过引用计数和写时复制在请求之间共享块。</p>
+      <p>代价是注意力 kernel 要通过块表间接寻址；块大小要在 kernel 效率和浪费之间权衡；显存不够时要抢占。</p></div></details>
+    <details><summary>v0.25 把 PagedAttention 删了，那 vLLM 现在还分页吗？</summary><div class="ans">
+      <p>还分页。删的是 vLLM 最早手写的 <code>paged_attention_v1/v2</code> CUDA kernel。现在 FlashAttention、FlashInfer、FlashMLA 等后端都原生支持按块表读写分页 KV cache，V0 删除后旧 kernel 已经没有调用方。块池、块表、按需分配、前缀缓存都还在 KV cache manager 里。</p></div></details>
+    <details><summary>V1 和 V0 最大的区别是什么？</summary><div class="ans">
+      <p>三点。一是进程拆分：API server（分词、反分词、流式输出）和 EngineCore（调度、KV 块管理）分进程，CPU 工作和 GPU 执行重叠。二是统一调度：不区分 prefill 和 decode，每步只决定每个请求算几个 token，chunked prefill、前缀缓存、投机解码都是特例。三是执行层：worker 缓存请求状态只收增量，输入张量常驻、按差异更新，torch.compile 加分段 CUDA graph。前缀缓存因为开销降到不到 1% 而默认开启。</p></div></details>
+    <details><summary>前缀缓存怎么做？为什么只能复用前缀？</summary><div class="ans">
+      <p>vLLM 对每个满块用“父块哈希 + 本块 token + 额外键”算哈希，命中就复用物理块，引用计数加 1；引用为 0 的块留在 LRU 空闲队列里，内容保留，还能被命中，直到被淘汰。SGLang 用基数树做 token 粒度的最长前缀匹配。</p>
+      <p>从第 2 层开始，每个 token 的 K、V 都混入了前面所有 token 的信息，K 还带着 RoPE 的绝对位置，所以只有从开头完全一致才能复用。</p></div></details>
+    <details><summary>chunked prefill 有什么好处和代价？</summary><div class="ans">
+      <p>好处：长 prompt 不会独占一整步，正在 decode 的请求每步都能被排上，出字不卡；prefill 和 decode 混在一起，计算密集和访存密集的工作互补，GPU 利用率更高。</p>
+      <p>代价：一条长 prompt 要分多步算完，首 token 延迟变长；每一段都要读前面已经算好的 KV。token 预算越小，这两点越明显。</p></div></details>
+    <details><summary>显存不够了，正在跑的请求怎么办？</summary><div class="ans">
+      <p>抢占：从正在跑的请求里选最后加入的，释放它的 KV 块，放回等待队列，之后重新 prefill。V0 还支持把块换出到 CPU（swap），V1 默认只用重算，因为 prefill 是并行的，而且已算部分可能还能命中前缀缓存，重算往往比来回搬运便宜。现在还可以配 KV 卸载，把块存到 CPU 内存或更下层的存储。</p></div></details>
+    <details><summary>CUDA graph 为什么要分段？<code>FULL_AND_PIECEWISE</code> 是什么？</summary><div class="ans">
+      <p>CUDA graph 要求形状固定。注意力的形状随每条请求的长度变化，prefill 和 decode 还混在同一个 batch 里，所以 V1 先把注意力留在图外、其余部分分段录制，所有注意力后端都兼容。</p>
+      <p>纯 decode 的 batch 形状规整，可以把注意力也录进去，开销最低。<code>FULL_AND_PIECEWISE</code> 就是纯 decode 用整图、混合 batch 用分段图，v0.11 起默认，代价是更多的录制时间和显存。</p></div></details>
+    <details><summary>异步调度解决什么问题？难点在哪？</summary><div class="ans">
+      <p>串行时 GPU 每一步都要等 CPU 调度、准备输入、处理输出。异步调度让 CPU 在 GPU 跑第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> 步时就调度第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">n+1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span> 步。难点是第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">n+1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span> 步的输入依赖第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> 步采样出的 token，而 CPU 此时还拿不到，要在 GPU 上直接把采样结果接到下一步的输入；抢占、投机解码、结构化输出都要和这个机制兼容，所以从 v0.10 实验到 v0.14 才默认开启。</p></div></details>
+    <details><summary>为什么要做 PD 分离？代价是什么？</summary><div class="ans">
+      <p>prefill 是计算瓶颈、决定首 token 延迟；decode 是访存瓶颈、决定每 token 延迟。混在一起，长 prefill 会拖慢 decode，两者的并行策略、batch 大小、CUDA graph 配置也没法分别优化。分开部署后可以各自扩缩容。</p>
+      <p>代价是 KV cache 要从 prefill 实例传到 decode 实例，需要高速网络（vLLM 通过 KV connector 接 NIXL、LMCache、Mooncake）；请求量小的时候，两组实例的资源利用率可能都不高。</p></div></details>
+    <details><summary>vLLM 启动时 KV cache 的大小是怎么确定的？</summary><div class="ans">
+      <p>先加载权重，再用 <code>max_num_batched_tokens</code> 个 token 跑一次假前向测出激活峰值，加上 CUDA graph 和其他开销，用 <code>gpu_memory_utilization</code> 乘总显存减掉这些，剩下的全给 KV cache，按每块的字节数切成块。所以调大 <code>max_num_batched_tokens</code> 会让 KV cache 变小一点；OOM 时可以调小它或者调低利用率。</p></div></details>
+    <details><summary>vLLM 和 SGLang、TensorRT-LLM 有什么区别？</summary><div class="ans">
+      <p>三者的核心技术已经趋同：分页 KV cache、前缀缓存、continuous batching、chunked prefill、投机解码、PD 分离都有。区别更多在侧重点：vLLM 模型和硬件覆盖最广，社区最大，新模型通常首日支持；SGLang 从 RadixAttention 和结构化生成起家，调度开销低，在大规模 MoE 部署上很强；TensorRT-LLM 是 NVIDIA 的方案，和自家硬件、kernel 结合最紧。选型时以自己的模型、硬件和负载实测为准。</p></div></details>
+    <details><summary>多租户下前缀缓存有什么安全问题？</summary><div class="ans">
+      <p>命中缓存时首 token 明显更快，攻击者可以通过构造前缀、测量延迟，推测别人请求里有没有某段内容。vLLM 支持给请求加 cache salt，salt 混进第一个块的哈希，只有 salt 相同的请求才能共享缓存。另外哈希默认用 SHA-256，避免碰撞导致读到别人的 KV。</p></div></details>
+  </div>
+</section>
+
+<section id="tpl" class="stack">
+  <div class="sec-head"><span class="eyebrow">2 分钟口述</span><h2>答题模板</h2></div>
+  <ol class="tpl">
+    <li><b>一句话定位。</b>vLLM 是开源的 LLM 推理引擎，起家于 PagedAttention：像操作系统分页一样管理 KV cache，几乎消除显存浪费，吞吐提升 2 到 4 倍。</li>
+    <li><b>讲内存管理。</b>固定大小的块、块表、按需分配、引用计数和写时复制；前缀缓存按“父块哈希 + 本块 token”命中，LRU 淘汰，只能复用前缀。</li>
+    <li><b>讲 V1。</b>为什么重写（V0 特性组合复杂、CPU 开销成为瓶颈）；分进程；统一调度，每步只决定每个请求算几个 token，chunked prefill 和投机解码都是特例；torch.compile 加分段 CUDA graph。</li>
+    <li><b>讲近期演进。</b>V0 在 v0.11 删光；异步调度 v0.14 默认；Model Runner V2 在 v0.29 全面默认；KV 卸载变成多层；DP + EP、PD 分离、KV connector 支撑大 MoE 的大规模部署。</li>
+    <li><b>讲调参。</b><code>gpu_memory_utilization</code>、<code>max_num_batched_tokens</code>（首 token 延迟和出字流畅度的权衡）、<code>max_num_seqs</code>、FP8 KV cache；KV cache 大小是启动时实测激活后剩下的显存。</li>
+  </ol>
+  <p class="note">常见失分点：说 PagedAttention 减少了计算量（它减少的是显存浪费，靠更大的 batch 提升吞吐）；说前缀缓存能复用任意相同片段（只能是前缀）；说 V1 还分 prefill 步和 decode 步（统一按 token 调度）；说 v0.25 以后 vLLM 不分页了（删的只是旧 kernel）；说抢占时会把 KV 换出到 CPU（V1 默认重算）。</p>
+  <div class="src">资料来源：
+    <ul>
+      <li><a href="https://arxiv.org/abs/2309.06180">Efficient Memory Management for LLM Serving with PagedAttention</a> · <a href="https://vllm.ai/blog/2025-01-27-v1-alpha-release">vLLM V1 alpha 发布博客</a> · <a href="https://github.com/vllm-project/vllm/releases">vLLM 各版本发布说明</a>（v0.1.0 到 v0.32.0）· <a href="https://github.com/vllm-project/vllm/pull/47361">PR #47361 Delete PagedAttention</a></li>
+      <li>vLLM 文档：<a href="https://docs.vllm.ai/en/latest/design/prefix_caching.html">Automatic Prefix Caching</a> · <a href="https://docs.vllm.ai/en/latest/design/cuda_graphs.html">CUDA Graphs</a> · <a href="https://docs.vllm.ai/en/latest/configuration/optimization.html">Optimization and Tuning</a></li>
+      <li><a href="https://arxiv.org/abs/2312.07104">SGLang</a>（RadixAttention）· <a href="https://www.usenix.org/conference/osdi22/presentation/yu">Orca</a> · <a href="https://arxiv.org/abs/2403.02310">Sarathi-Serve</a> · <a href="https://arxiv.org/abs/2401.09670">DistServe</a> · <a href="https://arxiv.org/abs/2407.00079">Mooncake</a></li>
+    </ul>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  var PRE=[["示例：两条长短 prompt",16384,256,3,"20000, 3000",4],["旧默认预算 8192",8192,256,3,"20000, 3000",4],["小预算，出字优先",2048,256,8,"6000",4],["并发上限 4，看补位",16384,4,0,"500, 500, 500, 500, 500, 500",3]];
+  PRE.forEach(function(p){var b=document.createElement("button");b.type="button";b.textContent=p[0];b.addEventListener("click",function(){$("sT").value=p[1];$("sS").value=p[2];$("sD").value=p[3];$("sP").value=p[4];$("sO").value=p[5];draw();});$("sPre").appendChild(b);});
+  function draw(){
+    var T=Math.max(1,parseInt($("sT").value,10)||1), S=Math.max(1,parseInt($("sS").value,10)||1), D=Math.max(0,parseInt($("sD").value,10)||0), O=Math.max(1,parseInt($("sO").value,10)||1);
+    var P=$("sP").value.split(/[,，\s]+/).map(function(x){return parseInt(x,10);}).filter(function(x){return x>0;}).slice(0,6);
+    var reqs=P.map(function(n,i){return {name:"新"+(i+1),len:n,done:0,gen:0,state:"wait",first:null,admit:null,end:null};});
+    $("sH").innerHTML='<tr><th>步</th><th class="num">已有 decode</th>'+reqs.map(function(r){return '<th class="num">'+r.name+'（'+r.len+'）</th>';}).join("")+'<th class="num">合计</th></tr>';
+    var running=[], waiting=reqs.slice(), rows="", step=0;
+    while(step<12 && reqs.some(function(r){return r.state!=="fin";})){
+      step++;
+      var budget=T, alloc={}, oldGot=Math.min(D,budget); budget-=oldGot;
+      running.forEach(function(r){
+        if(budget<=0){alloc[r.name]=0;return;}
+        var need=r.state==="pre"?r.len-r.done:1, g=Math.min(need,budget);
+        alloc[r.name]=g; budget-=g;
+        if(r.state==="pre"){r.done+=g; if(r.done>=r.len){r.first=step;r.gen=1;}}
+        else if(g>0){r.gen++;}
+      });
+      while(waiting.length && budget>0 && D+running.length<S){
+        var r=waiting.shift(); r.state="pre"; r.admit=step; running.push(r);
+        var g=Math.min(r.len,budget); alloc[r.name]=g; budget-=g; r.done+=g;
+        if(r.done>=r.len){r.first=step;r.gen=1;}
+      }
+      var cells=reqs.map(function(r){
+        var a=alloc[r.name];
+        if(a===undefined) return '<td class="num">'+(r.state==="wait"?"等待":"—")+'</td>';
+        var tag="";
+        if(r.first===step) tag="（算完，出首 token）";
+        else if(r.state==="pre"&&a>0) tag="（还差 "+(r.len-r.done)+"）";
+        if(r.first!==null&&r.gen>=O) tag+="（生成满 "+O+" 个，结束）";
+        return '<td class="num'+(a===0?" cut":"")+'">'+a+tag+'</td>';
+      }).join("");
+      rows+='<tr><th>'+step+'</th><td class="num">'+oldGot+(oldGot<D?"（只排上 "+oldGot+" 条）":"")+'</td>'+cells+'<td class="num">'+(T-budget)+'</td></tr>';
+      running=running.filter(function(r){
+        if(r.first!==null&&r.gen>=O){r.state="fin";r.end=step;return false;}
+        if(r.first!==null) r.state="dec";
+        return true;
+      });
+    }
+    $("sB").innerHTML=rows||'<tr><td colspan="9">没有新请求</td></tr>';
+    var msg;
+    if(!reqs.length) msg="填几个 prompt 长度试试。";
+    else{
+      msg="预算 "+T+" 下："+reqs.map(function(r){
+        if(r.admit===null) return r.name+" 12 步内一直在排队";
+        return r.name+" 第 "+r.admit+" 步被接纳，"+(r.first?"第 "+r.first+" 步出首 token":"12 步内还没算完 prompt")+(r.end?"，第 "+r.end+" 步结束":"");
+      }).join("；")+"。";
+      if(D>T) msg+=" 已有的 decode 条数超过了预算，有的 decode 请求这一步排不上，实际系统里预算至少要大于并发条数。";
+      else if(D>0) msg+=" 已有的 "+D+" 条 decode 每一步都排上了，没有被长 prompt 卡住。";
+      if(D+reqs.length>S) msg+=" 并发条数上限是 "+S+"：前面的请求一结束，等待的请求下一步就补进来，不用等整批跑完，这就是 continuous batching。";
+    }
+    $("sMsg").textContent=msg;
+  }
+  ["sT","sS","sD","sP","sO"].forEach(function(id){$(id).addEventListener("input",draw);});
+  draw();
+
+  var ds=document.querySelectorAll("#qa details");
+  $("openAll").addEventListener("click",function(){ds.forEach(function(d){d.open=true;});});
+  $("closeAll").addEventListener("click",function(){ds.forEach(function(d){d.open=false;});});
+})();
+</script>
+</body>
+</html>
