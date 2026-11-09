@@ -1,0 +1,944 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- 搜索结果跳到知识库里带侧栏的条目页,而不是这份裸 HTML -->
+<meta data-pagefind-meta="url[content]" content="/interview/agent/langchain-langgraph/">
+<meta name="description" content="LangChain 与 LangGraph 八股:两者的分层关系与演进,LCEL 与 Runnable,create_agent 编译出的图与六个中间件钩子,StateGraph 的状态、reducer、条件边、Send 与 Command,Pregel 风格的 super-step 执行模型与 recursion limit,checkpointer、时间旅行与 Store,interrupt 人在环中,流式模式,多智能体四种模式与 Deep Agents,以及 2026 年 langgraph 1.1/1.2、langchain 1.4 的新变化。配 super-step、中断恢复两个对照真库验证的交互实验与高频追问。">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>LangChain 与 LangGraph：create_agent、中间件、状态图与持久化</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@600;900&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous">
+<style>
+/* Layout: 与其他八股页同一套规格书式单栏长文 */
+:root{
+  --bg:#EFF2F4; --surface:#FFFFFF; --surface-2:#F7F9FA;
+  --ink:#16212B; --muted:#5B6873; --line:#D3DAE0; --line-strong:#9AA6B0;
+  --seq:#2F5FD0; --seq-bg:#E3EBFB;
+  --tok:#0C8578; --tok-bg:#DBF1ED;
+  --pos:#2E7D32; --pos-bg:#E3F2E4;
+  --neg:#C2412D; --neg-bg:#FBE7E3;
+  --warn:#B0731A; --warn-bg:#F7EBD6;
+  --norm-bg:#EAEEF1;
+  --display:"Noto Serif SC","Songti SC",serif;
+  --sans:-apple-system,"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --seq:#86A7F4; --seq-bg:#1C2A47;
+  --tok:#4CC6B6; --tok-bg:#11332F;
+  --pos:#6FCF7A; --pos-bg:#16301A;
+  --neg:#FF8A73; --neg-bg:#3B1E18;
+  --warn:#E2A851; --warn-bg:#382A13;
+  --norm-bg:#212C37;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --seq:#86A7F4; --seq-bg:#1C2A47;
+  --tok:#4CC6B6; --tok-bg:#11332F;
+  --pos:#6FCF7A; --pos-bg:#16301A;
+  --neg:#FF8A73; --neg-bg:#3B1E18;
+  --warn:#E2A851; --warn-bg:#382A13;
+  --norm-bg:#212C37;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.75}
+.wrap{max-width:1040px;margin:0 auto;padding-block:40px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:56px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.3}
+h1{font-size:clamp(28px,5vw,44px);font-weight:900;letter-spacing:.01em}
+h2{font-size:clamp(22px,3.2vw,28px);font-weight:900}
+h3{font-size:19px;font-weight:600}
+p{margin:0;max-width:68ch}
+code,.mono{font-family:var(--mono);font-size:.9em}
+a{color:var(--seq)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--seq);outline-offset:3px;border-radius:4px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.stack{display:flex;flex-direction:column;gap:16px}
+.sec-head{display:flex;flex-direction:column;gap:6px;border-top:2px solid var(--ink);padding-top:14px}
+
+header{display:flex;flex-direction:column;gap:18px}
+.lede{font-size:17px;color:var(--muted);max-width:60ch}
+.toc{display:flex;flex-wrap:wrap;gap:8px}
+.toc a{font-size:13.5px;text-decoration:none;color:var(--ink);border:1px solid var(--line);background:var(--surface);padding:4px 12px;border-radius:999px}
+.toc a:hover{border-color:var(--ink)}
+
+.recite{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--ink);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.recite p{max-width:none}
+.recite .tag{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.08em}
+mark{background:var(--warn-bg);color:inherit;padding:0 3px;border-radius:3px}
+
+figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.scroll{overflow-x:auto}
+.dg{display:block;width:100%;min-width:760px;height:auto}
+figcaption{font-size:13.5px;color:var(--muted)}
+.dg text{fill:var(--ink);font-family:var(--sans);font-size:12.5px}
+.dg .c{text-anchor:middle;dominant-baseline:central}
+.dg .s{font-size:11.5px;fill:var(--muted)}
+.dg .h{font-weight:700;font-size:13.5px}
+.dg .m{font-family:var(--mono);font-size:11.5px}
+.dg rect{stroke-width:1.2}
+.b-io{fill:var(--surface);stroke:var(--ink)}
+.b-seq{fill:var(--seq-bg);stroke:var(--seq)}
+.b-tok{fill:var(--tok-bg);stroke:var(--tok)}
+.b-pos{fill:var(--pos-bg);stroke:var(--pos)}
+.b-neg{fill:var(--neg-bg);stroke:var(--neg)}
+.b-ref{fill:var(--warn-bg);stroke:var(--warn)}
+.panel{fill:var(--surface-2);stroke:var(--line)}
+.ln{stroke:var(--muted);stroke-width:1.3;fill:none}
+.arr{marker-end:url(#ah)}
+.ahp{fill:var(--muted)}
+.dg .pos{fill:var(--pos)}
+.dg .neg{fill:var(--neg)}
+.dg .zero{fill:var(--warn-bg);stroke:none}
+.dg .gd{stroke:var(--line-strong);stroke-width:1;stroke-dasharray:3 3}
+.dg .ax{stroke:var(--ink);stroke-width:1.2}
+.dg .ghost{fill:none;stroke:var(--line-strong);stroke-width:1.2;stroke-dasharray:4 3}
+.dg .mk-old{stroke:var(--warn);stroke-width:3}
+.dg .mk-new{stroke:var(--pos);stroke-width:3}
+.mul{color:#D9822B;font-weight:700}
+.dg .cl-raw{stroke:var(--muted);stroke-width:1.4;stroke-dasharray:6 4;fill:none}
+.dg .cl-clip{stroke:var(--seq);stroke-width:2.6;fill:none}
+.dg .dot{fill:var(--neg)}
+
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.pt{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pt h3{font-family:var(--sans);font-size:15.5px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0}
+.pt p,.pt li{font-size:14.5px;line-height:1.7}
+.pt ul{margin:0;padding-left:1.2em}
+.chip{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;border:1px solid;letter-spacing:.03em}
+.chip.seq{color:var(--seq);border-color:var(--seq);background:var(--seq-bg)}
+.chip.tok{color:var(--tok);border-color:var(--tok);background:var(--tok-bg)}
+.chip.warn{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.note{font-size:14px;color:var(--muted);border:1px dashed var(--line-strong);border-radius:8px;padding:12px 14px}
+/* KaTeX 的 MathML 是绝对定位的，容器要定位才能把它裁在里面，否则手机上会横向溢出 */
+.scroll,.tbl,.tex-d,.fo,.katex{position:relative}
+.fo{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-family:var(--sans);font-size:12.5px;line-height:1.25;color:var(--ink)}
+.fo .katex{font-size:1.02em}
+.fo .fs,.fo.fs{font-size:11.5px;color:var(--muted)}
+.fo.fs .katex{color:var(--ink)}
+.tex-d{overflow-x:auto;overflow-y:hidden}
+.tex-d .katex-display{margin:.3em 0}
+.katex{font-size:1.08em}
+.terms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.term{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.term .k{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.term p{font-size:14.5px}
+pre{margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.6;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto}
+pre .cm{color:var(--muted)}
+
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:680px;font-size:13.5px;line-height:1.55}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+thead th{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--muted);background:var(--surface-2)}
+tbody th{font-weight:700;white-space:nowrap}
+tr:last-child th,tr:last-child td{border-bottom:0}
+td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+td.cut{background:var(--warn-bg)}
+.posv{color:var(--pos);font-weight:600}
+.negv{color:var(--neg);font-weight:600}
+.flow{color:var(--pos)} .stop{color:var(--warn);font-weight:600}
+
+/* lab */
+.lab{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:16px}
+.lab h3{font-family:var(--sans);font-size:15.5px;font-weight:700}
+.row{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:flex-end}
+.fld{display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.fld input[type=number]{font:inherit;font-family:var(--mono);font-size:13px;width:84px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+input:focus-visible{outline:2px solid var(--seq);outline-offset:1px}
+.chk{display:flex;gap:6px;align-items:center;font-size:13.5px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button[aria-pressed=true]{border-color:var(--ink);background:var(--surface-2);font-weight:700}
+.toks{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.tk{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface-2);min-width:0}
+.tk .w{font-weight:700;font-size:14px}
+.tk .v{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tk input[type=range]{width:100%}
+.tk label.v{display:flex;flex-direction:column;gap:2px}
+.fld input.txt{font:inherit;font-family:var(--mono);font-size:13px;width:230px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+.fld select{font:inherit;font-family:var(--mono);font-size:13px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+.mbar{display:flex;height:26px;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;background:var(--surface-2)}
+.mbar span{display:block;height:100%}
+.mw{background:var(--seq)} .mk{background:var(--tok)} .mf{background:var(--surface-2)} .mo{background:var(--neg)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;border:1px solid var(--line-strong)}
+.verdict{font-size:14px;border-left:3px solid var(--warn);padding:6px 12px;background:var(--warn-bg);border-radius:0 6px 6px 0}
+
+.qa{display:flex;flex-direction:column;gap:10px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 18px}
+summary{cursor:pointer;padding:14px 0;font-weight:700;font-size:15px;list-style:none;display:flex;gap:10px}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"+";font-family:var(--mono);color:var(--muted);width:14px;flex:none}
+details[open] summary::before{content:"−"}
+details .ans{padding:0 0 16px 24px;display:flex;flex-direction:column;gap:8px;font-size:14.5px}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;font-size:13px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);padding:5px 12px;border-radius:6px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button:focus-visible{outline:2px solid var(--seq);outline-offset:2px}
+
+ol.tpl{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:8px;max-width:72ch}
+ol.tpl b{font-weight:700}
+.src{font-size:13px;color:var(--muted)}
+.src ul{margin:6px 0 0;padding-left:1.2em}
+
+@media (max-width:760px){
+  .grid2,.terms{grid-template-columns:1fr}
+  .toks{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+#aOut td,#bOut td{white-space:normal}
+#bLog th{width:2.5em}
+#bLogW{max-height:300px;overflow-y:auto}
+.katex-display{overflow-x:auto;overflow-y:hidden}
+button:disabled{opacity:.45;cursor:default}
+p code,li code,td code,.ans code,summary code,figcaption code{overflow-wrap:anywhere}
+</style>
+</head>
+<body data-pagefind-body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">大模型面试八股 · Agent 篇</div>
+  <h1>LangChain 与 LangGraph</h1>
+  <p class="lede">LangChain 和 LangGraph 出自同一家公司，现在是上下两层：LangGraph 是底层的编排运行时，把 agent 写成一张带状态的图，负责并行、存档、暂停和恢复；LangChain 1.0 收缩成 <code>create_agent</code> 加中间件，编译出来就是一张 LangGraph 图。本文先讲两者的关系和演进，再讲 LangGraph 的状态、reducer、super-step 执行模型、checkpoint、interrupt，最后讲多智能体和 2026 年的新变化。两个实验分别对着真实的 langgraph 1.2.20 跑过，checkpoint 的编号和报错都和真库一致。</p>
+  <nav class="toc" aria-label="目录">
+    <a href="#recite">背诵版</a><a href="#rel">两者关系</a><a href="#hist">演进</a><a href="#core">组件与 LCEL</a><a href="#agent"><code>create_agent</code></a><a href="#mw">中间件</a><a href="#graph">StateGraph</a><a href="#pregel">执行模型</a><a href="#lab1">super-step 实验</a><a href="#persist">持久化</a><a href="#hitl">人在环中</a><a href="#lab2">中断实验</a><a href="#stream">流式输出</a><a href="#multi">多智能体</a><a href="#new">2026 新变化</a><a href="#cmp">怎么选</a><a href="#qa">高频追问</a><a href="#tpl">答题模板</a>
+  </nav>
+</header>
+
+<section id="recite" class="stack">
+  <div class="sec-head"><span class="eyebrow">先给结论</span><h2>30 秒背诵版</h2></div>
+  <div class="recite">
+    <p><b>LangChain</b> 是 Harrison Chase 2022 年 10 月开源的 LLM 应用框架，早期提供提示词模板、链（chain）、各家模型和向量库的统一接口；2023 年推出 LCEL，所有组件实现同一个 <code>Runnable</code> 接口，用 <code>|</code> 拼成流水线。它被诟病的地方是抽象层太厚、版本变化快，老的 <code>AgentExecutor</code> 是个黑盒循环，难以插入自定义逻辑。</p>
+    <p><b>LangGraph</b> 2024 年 1 月发布，把 agent 写成一张状态图：<b>State</b> 是共享状态，每个字段可以配 reducer 决定怎么合并；<b>Node</b> 是读状态、返回更新的函数；<b>Edge</b> 决定下一步，条件边可以分支和成环。运行时借鉴 Pregel，按 <b>super-step</b> 执行：同一步的节点并行跑，写入在步末统一合并。配上 checkpointer，每个 super-step 存一次档，于是有了多轮记忆、<code>interrupt()</code> 人工审批、时间旅行和失败后从断点恢复。</p>
+    <p>2025 年 10 月两者同时发布 1.0。LangChain 1.0 只保留 <code>create_agent</code>、中间件、模型和工具接口，底层就是编译出来的 LangGraph 图；旧的链和检索器移到 <code>langchain-classic</code>。一句话分工：<b>要标准的“模型调工具”循环用 LangChain，要自己设计流程、分支、并行、长时间运行和人工介入用 LangGraph</b>，两者可以混用。到 2026 年 11 月，最新版是 langchain 1.4.9 和 langgraph 1.2.20。</p>
+  </div>
+</section>
+
+<section id="rel" class="stack">
+  <div class="sec-head"><span class="eyebrow">概念</span><h2>LangChain、LangGraph 和周边各是什么</h2></div>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 320" role="img" aria-label="分层示意：最上层 Deep Agents 依赖 LangChain 1.x，LangChain 依赖 LangGraph，LangGraph 依赖 langchain-core；旁边是兼容用的 langchain-classic 和商业平台 LangSmith">
+<rect class="b-ref" x="60" y="10" width="560" height="60" rx="6"/><foreignObject x="60" y="10" width="560" height="60"><div class="fo"><span>Deep Agents</span><span class="fs"><code>create_deep_agent</code>：文件系统、子 agent、上下文压缩、skills、记忆</span></div></foreignObject>
+<rect class="b-tok" x="60" y="90" width="560" height="60" rx="6"/><foreignObject x="60" y="90" width="560" height="60"><div class="fo"><span>LangChain 1.x</span><span class="fs"><code>create_agent</code>、中间件、<code>init_chat_model</code>、结构化输出、<code>langchain.mcp</code></span></div></foreignObject>
+<rect class="b-seq" x="60" y="170" width="560" height="60" rx="6"/><foreignObject x="60" y="170" width="560" height="60"><div class="fo"><span>LangGraph</span><span class="fs"><code>StateGraph</code>、Pregel 运行时、checkpointer、store、<code>interrupt</code>、流式输出</span></div></foreignObject>
+<rect class="b-io" x="60" y="250" width="560" height="60" rx="6"/><foreignObject x="60" y="250" width="560" height="60"><div class="fo"><span>langchain-core</span><span class="fs"><code>Runnable</code>、消息与内容块、模型和工具接口；各家集成包实现这些接口</span></div></foreignObject>
+<line class="ln arr" x1="340" y1="70" x2="340" y2="88"/>
+<line class="ln arr" x1="340" y1="150" x2="340" y2="168"/>
+<line class="ln arr" x1="340" y1="230" x2="340" y2="248"/>
+<foreignObject x="0" y="20" width="56" height="280"><div class="fo" style="writing-mode:vertical-rl"><span class="fs">依赖方向</span></div></foreignObject>
+<rect class="ghost" x="640" y="90" width="130" height="60" rx="6"/><foreignObject x="640" y="90" width="130" height="60"><div class="fo"><span><code>langchain-classic</code></span><span class="fs">旧链、检索器、<code>AgentExecutor</code></span></div></foreignObject>
+<rect class="b-pos" x="790" y="10" width="160" height="300" rx="6"/><foreignObject x="790" y="10" width="160" height="300"><div class="fo"><span>LangSmith</span><span class="fs">追踪、评测<br>提示词管理<br>Deployment<br>（原 LangGraph Platform）<br>Studio</span></div></foreignObject>
+</svg>
+    </div>
+    <figcaption>依赖方向从上往下：deepagents 依赖 langchain，langchain 依赖 langgraph，langgraph 只依赖 <code>langchain-core</code>，不依赖 <code>langchain</code> 包本身。LangSmith 是商业平台，负责观测、评测和部署，不是开源库的一部分。</figcaption>
+  </figure>
+  <div class="tbl"><table style="min-width:720px">
+    <thead><tr><th>名字</th><th>是什么</th><th>面试里怎么说</th></tr></thead>
+    <tbody>
+      <tr><th><code>langchain-core</code></th><td>基础抽象：<code>Runnable</code>、消息和内容块、<code>BaseChatModel</code>、工具、回调</td><td>所有包共同的地基，各家模型的集成包（<code>langchain-openai</code>、<code>langchain-anthropic</code> 等）实现这里的接口</td></tr>
+      <tr><th>LangGraph</th><td>底层编排框架和运行时：<code>StateGraph</code>、checkpointer、store、<code>interrupt</code>、流式输出</td><td>“低层、可控”，不替你写提示词，也不规定 agent 结构</td></tr>
+      <tr><th>LangChain 1.x</th><td><code>create_agent</code>、中间件、<code>init_chat_model</code>、结构化输出、MCP 接入</td><td>“最快写出一个 agent”，循环是固定的“模型 → 工具 → 模型”，用中间件改行为</td></tr>
+      <tr><th><code>langchain-classic</code></th><td>1.0 之前的链、检索器、<code>AgentExecutor</code>、索引 API、hub</td><td>只为兼容，新项目不用</td></tr>
+      <tr><th>Deep Agents</th><td><code>create_deep_agent</code>：在 <code>create_agent</code> 上预装文件系统、子 agent、上下文压缩、skills、记忆</td><td>开箱即用的 agent harness，思路和 Claude Code 这类 coding agent 一致</td></tr>
+      <tr><th>LangSmith</th><td>链路追踪、评测、提示词管理；部署服务原名 LangGraph Platform，2025 年 10 月改名 LangSmith Deployment</td><td>可观测性和上线托管，按量收费，可以不用</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="hist" class="stack">
+  <div class="sec-head"><span class="eyebrow">时间线</span><h2>从“链”到“图”的演进</h2></div>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th>时间</th><th>事件</th></tr></thead>
+    <tbody>
+      <tr><th>2022.10</th><td>Harrison Chase 开源 LangChain，核心概念是 chain：把提示词模板、模型调用、输出解析串起来；agent 是 ReAct 风格的“想一步、调一个工具”循环</td></tr>
+      <tr><th>2023.04</th><td>成立公司，Benchmark、Sequoia 先后投资</td></tr>
+      <tr><th>2023 下半年</th><td>推出 LCEL：组件统一实现 <code>Runnable</code>，用 <code>|</code> 组合，自动获得流式、批量、异步</td></tr>
+      <tr><th>2024.01</th><td>langchain 0.1.0，第一个稳定版，此前已拆出 <code>langchain-core</code> 和 <code>langchain-community</code>；同月发布 LangGraph</td></tr>
+      <tr><th>2024.02</th><td>LangSmith 正式可用，A 轮 2500 万美元</td></tr>
+      <tr><th>2024.05 / 09</th><td>0.2 让 <code>langchain</code> 不再依赖 community 包；0.3 全面切到 Pydantic 2。旧的 Memory 类和 <code>AgentExecutor</code> 的文档开始引导迁移到 LangGraph</td></tr>
+      <tr><th>2025.01–02</th><td>LangGraph Functional API（<code>@entrypoint</code>、<code>@task</code>）；<code>langgraph-supervisor</code>、<code>langgraph-swarm</code> 两个多智能体库</td></tr>
+      <tr><th>2025.05</th><td>LangGraph Platform 正式可用</td></tr>
+      <tr><th>2025.07</th><td>发布 Deep Agents（<code>deepagents</code>）</td></tr>
+      <tr><th>2025.10</th><td>LangChain 1.0 和 LangGraph 1.0（承诺 2.0 之前没有破坏性变更）；<code>langgraph.prebuilt</code> 废弃，<code>create_react_agent</code> 由 <code>create_agent</code> 取代；B 轮 1.25 亿美元，估值 12.5 亿美元；LangGraph Platform 改名 LangSmith Deployment</td></tr>
+      <tr><th>2025.11–12</th><td>langchain 1.1：模型 profile、模型重试中间件；1.2：<code>ProviderStrategy</code> 严格结构化输出</td></tr>
+      <tr><th>2026.03</th><td>langgraph 1.1：<code>version="v2"</code> 的 <code>stream</code>、<code>invoke</code>，返回带类型的结果</td></tr>
+      <tr><th>2026.05</th><td>langgraph 1.2：节点超时、节点级错误处理、优雅停机、<code>DeltaChannel</code>、v3 事件流；langchain 1.3；deepagents 0.6</td></tr>
+      <tr><th>2026.09–10</th><td>langchain 1.4：MCP 并入 <code>langchain.mcp</code>；1.4.6 人工审批支持逐个调用中断；<code>langchain-core</code> 1.7 改了工具调用参数的流式格式</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">演进的主线：<b>链</b>适合固定流程，<b>agent</b> 需要循环和分支，链表达不了；LangGraph 用图来表达循环、分支、并行和状态，再把存档和人工介入做进运行时；最后 LangChain 本身退到图之上，只负责“快速写出标准 agent”。</p>
+</section>
+
+<section id="core" class="stack">
+  <div class="sec-head"><span class="eyebrow">LangChain 基础</span><h2>组件、Runnable 与 LCEL</h2></div>
+  <p>LangChain 最早的价值是<b>统一接口</b>：几十家模型、向量库、文档加载器各有各的 SDK，LangChain 给它们套上同一层抽象，换模型只改一行。到 1.x 这部分仍然是核心，放在 <code>langchain-core</code> 和各个集成包里。</p>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th>组件</th><th>作用</th><th>1.x 里的位置</th></tr></thead>
+    <tbody>
+      <tr><th>Chat model</th><td>统一的 <code>invoke</code>、<code>stream</code>、<code>bind_tools</code>、<code>with_structured_output</code>；<code>init_chat_model("provider:model")</code> 按字符串创建</td><td><code>langchain.chat_models</code></td></tr>
+      <tr><th>Messages</th><td><code>HumanMessage</code>、<code>AIMessage</code>（带 <code>tool_calls</code>）、<code>ToolMessage</code>（带 <code>tool_call_id</code>）；1.0 加了跨厂商统一的 <code>content_blocks</code>（文本、推理、工具调用、引用等）</td><td><code>langchain.messages</code></td></tr>
+      <tr><th>Tools</th><td><code>@tool</code> 从函数签名和 docstring 生成 JSON Schema；可以注入运行时状态，不暴露给模型</td><td><code>langchain.tools</code></td></tr>
+      <tr><th>Embeddings、向量库、检索器</th><td>RAG 的三件套；文本切分器在 <code>langchain-text-splitters</code></td><td>embeddings 在 <code>langchain.embeddings</code>，老检索器在 <code>langchain-classic</code></td></tr>
+      <tr><th>Prompt 模板、输出解析器</th><td>LCEL 时代的主角；有了原生工具调用和结构化输出后，用得少了</td><td><code>langchain-core</code></td></tr>
+    </tbody>
+  </table></div>
+  <h3>LCEL：所有东西都是 Runnable</h3>
+  <p>每个组件都实现 <code>invoke</code>、<code>batch</code>、<code>stream</code> 及其异步版本。<code>a | b</code> 生成 <code>RunnableSequence</code>，前一个的输出是后一个的输入；字典会被转成 <code>RunnableParallel</code>，并行执行各分支。组合出来的东西还是 Runnable，所以自动获得流式、批量、异步、重试（<code>with_retry</code>）、降级（<code>with_fallbacks</code>）和追踪。</p>
+<pre><code><span class="cm"># 经典 RAG 链（LCEL 写法）</span>
+chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt
+    | model
+    | StrOutputParser()
+)
+chain.invoke("LangGraph 的 checkpoint 存在哪？")</code></pre>
+  <div class="grid2">
+    <div class="pt"><h3>LCEL 适合什么</h3><p>有向无环的固定流程：检索 → 拼提示词 → 生成 → 解析。每一步做什么在写代码时就确定了，没有“根据模型输出决定下一步”的循环。</p></div>
+    <div class="pt"><h3>LCEL 不适合什么</h3><p>agent 要循环（调工具、看结果、再决定），要分支、要在中途停下等人确认、要在崩溃后续跑。用 Runnable 硬拼会变成难以调试的嵌套结构，这正是 LangGraph 要解决的问题。</p></div>
+  </div>
+</section>
+
+<section id="agent" class="stack">
+  <div class="sec-head"><span class="eyebrow">LangChain 1.x</span><h2><code>create_agent</code> 编译出来是什么</h2></div>
+  <p><code>create_agent</code> 实现的是最常见的 agent 循环：调模型，如果模型要调工具就执行工具，把结果交回模型，直到模型不再调工具。它不是一个黑盒，而是返回一个编译好的 LangGraph 图（<code>CompiledStateGraph</code>），所以 checkpointer、<code>interrupt</code>、流式输出、Studio 可视化全部可以直接用。</p>
+<pre><code>from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware, HumanInTheLoopMiddleware
+from langgraph.checkpoint.memory import InMemorySaver
+
+agent = create_agent(
+    model="anthropic:claude-sonnet-4-6",
+    tools=[search, send_email],
+    system_prompt="你是客服助手",
+    middleware=[
+        SummarizationMiddleware(model="openai:gpt-5.4-mini", trigger=("tokens", 80000)),
+        HumanInTheLoopMiddleware(interrupt_on={"send_email": True}),
+    ],
+    checkpointer=InMemorySaver(),
+)
+agent.invoke({"messages": [{"role": "user", "content": "查一下订单 42"}]},
+             {"configurable": {"thread_id": "user-1"}})</code></pre>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 270" role="img" aria-label="create_agent 编译出的图：START 到 before_agent，再到 before_model、model、after_model；有工具调用时进入 tools 节点并行执行，再回到 before_model；没有工具调用时经 after_agent 到 END">
+<rect class="b-io" x="10" y="40" width="64" height="54" rx="6"/><foreignObject x="10" y="40" width="64" height="54"><div class="fo"><span>START</span></div></foreignObject>
+<rect class="b-ref" x="96" y="40" width="130" height="54" rx="6"/><foreignObject x="96" y="40" width="130" height="54"><div class="fo"><span><code>A.before_agent</code></span><span class="fs">每次调用一次</span></div></foreignObject>
+<rect class="b-ref" x="252" y="40" width="130" height="54" rx="6"/><foreignObject x="252" y="40" width="130" height="54"><div class="fo"><span><code>A.before_model</code></span><span class="fs">每轮循环入口</span></div></foreignObject>
+<rect class="ghost" x="400" y="16" width="140" height="88" rx="8"/><foreignObject x="400" y="16" width="140" height="22"><div class="fo"><span class="fs"><code>wrap_model_call</code> 包住</span></div></foreignObject>
+<rect class="b-tok" x="412" y="40" width="116" height="54" rx="6"/><foreignObject x="412" y="40" width="116" height="54"><div class="fo"><span><code>model</code></span><span class="fs">调用模型</span></div></foreignObject>
+<rect class="b-ref" x="558" y="40" width="130" height="54" rx="6"/><foreignObject x="558" y="40" width="130" height="54"><div class="fo"><span><code>A.after_model</code></span><span class="fs">检查、审批、改路由</span></div></foreignObject>
+<rect class="b-ref" x="716" y="40" width="130" height="54" rx="6"/><foreignObject x="716" y="40" width="130" height="54"><div class="fo"><span><code>A.after_agent</code></span><span class="fs">结束前一次</span></div></foreignObject>
+<rect class="b-io" x="870" y="40" width="80" height="54" rx="6"/><foreignObject x="870" y="40" width="80" height="54"><div class="fo"><span>END</span></div></foreignObject>
+<line class="ln arr" x1="74" y1="67.0" x2="94" y2="67.0"/>
+<line class="ln arr" x1="226" y1="67.0" x2="250" y2="67.0"/>
+<line class="ln arr" x1="382" y1="67.0" x2="410" y2="67.0"/>
+<line class="ln arr" x1="528" y1="67.0" x2="556" y2="67.0"/>
+<line class="ln arr" x1="688" y1="67.0" x2="714" y2="67.0"/>
+<line class="ln arr" x1="846" y1="67.0" x2="868" y2="67.0"/>
+<foreignObject x="640" y="98" width="120" height="36"><div class="fo" style="align-items:flex-start;text-align:left"><span class="fs">没有工具调用<br>或 <code>jump_to="end"</code></span></div></foreignObject>
+<rect class="ghost" x="470" y="182" width="250" height="78" rx="8"/><foreignObject x="470" y="236" width="250" height="22"><div class="fo"><span class="fs">每个调用外面包 <code>wrap_tool_call</code></span></div></foreignObject>
+<rect class="b-seq" x="492" y="188" width="206" height="46" rx="6"/><foreignObject x="492" y="188" width="206" height="46"><div class="fo"><span><code>tools</code></span><span class="fs">每个工具调用一个 <code>Send</code>，同一步并行</span></div></foreignObject>
+<path class="ln arr" d="M623,94 L623,186"/>
+<foreignObject x="470" y="134" width="145" height="36"><div class="fo" style="align-items:flex-end;text-align:right"><span class="fs">有待执行的工具调用</span></div></foreignObject>
+<path class="ln arr" d="M492,211 L317,211 L317,96"/>
+<foreignObject x="260" y="216" width="220" height="40"><div class="fo" style="align-items:flex-start;text-align:left"><span class="fs">结果写回 <code>messages</code>，回到循环入口</span></div></foreignObject>
+</svg>
+    </div>
+    <figcaption>以 langchain 1.4.9 的源码为准：模型节点叫 <code>model</code>，工具节点叫 <code>tools</code>，每个中间件的每个钩子是一个独立节点，名字是“中间件名.钩子名”。模型一次返回多个工具调用时，每个调用是一个 <code>Send("tools", [call])</code>，在同一个 super-step 里并行执行。</figcaption>
+  </figure>
+  <h3>循环什么时候结束</h3>
+  <ul>
+    <li>最后一条 <code>AIMessage</code> 没有工具调用，这是标准的出口。</li>
+    <li>本轮执行的工具都设置了 <code>return_direct=True</code>。</li>
+    <li>用了结构化输出，并且已经生成了 <code>structured_response</code>。</li>
+    <li>中间件在状态里写了 <code>jump_to="end"</code>。</li>
+    <li>都不满足时，安全网是 recursion limit：<code>create_agent</code> 默认把它设为 9999 个 super-step，超了抛 <code>GraphRecursionError</code>。实际项目应该用 <code>ModelCallLimitMiddleware</code>、<code>ToolCallLimitMiddleware</code> 设置更小的上限。</li>
+  </ul>
+  <h3>结构化输出的三种策略</h3>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th>策略</th><th>做法</th><th>特点</th></tr></thead>
+    <tbody>
+      <tr><th><code>ToolStrategy(Schema)</code></th><td>把输出格式定义成一个“工具”，模型调用它就等于交答案</td><td>所有支持工具调用的模型都能用；<code>handle_errors</code> 处理解析失败或一次调用多个的情况，把错误发回模型重试</td></tr>
+      <tr><th><code>ProviderStrategy(Schema)</code></th><td>用厂商原生的结构化输出（约束解码）</td><td>格式由厂商保证；1.2 起支持严格模式，只有部分模型支持</td></tr>
+      <tr><th>直接传类型</th><td>按模型 profile 自动选：支持原生结构化输出就用 Provider，否则用 Tool</td><td>默认推荐</td></tr>
+    </tbody>
+  </table></div>
+  <p>和 0.x 的区别：以前要先跑完 agent 再额外调一次模型做格式化，1.0 把结构化输出放进主循环，少一次调用。结果放在返回状态的 <code>structured_response</code> 里。</p>
+</section>
+
+<section id="mw" class="stack">
+  <div class="sec-head"><span class="eyebrow">LangChain 1.x</span><h2>中间件：六个钩子与执行顺序</h2></div>
+  <p>中间件是 1.0 最重要的设计。以前要改 agent 行为，只能改提示词，或者把 <code>AgentExecutor</code> 整个重写；现在把可变的部分抽成钩子，继承 <code>AgentMiddleware</code> 重写其中几个，或者用同名装饰器写成函数。</p>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th>钩子</th><th>何时运行</th><th>典型用途</th></tr></thead>
+    <tbody>
+      <tr><th><code>before_agent</code></th><td>每次调用开始时一次</td><td>加载记忆、校验输入</td></tr>
+      <tr><th><code>before_model</code></th><td>每次调模型前（节点）</td><td>裁剪、压缩消息历史，检查调用次数</td></tr>
+      <tr><th><code>wrap_model_call</code></th><td>包住模型调用（不是节点，是函数包装）</td><td>动态换模型、筛选工具、改系统提示词、重试、降级、缓存</td></tr>
+      <tr><th><code>after_model</code></th><td>模型返回后（节点）</td><td>人工审批工具调用、内容审核、写 <code>jump_to</code> 改路由</td></tr>
+      <tr><th><code>wrap_tool_call</code></th><td>包住每个工具调用</td><td>工具重试、把异常转成错误消息、权限检查</td></tr>
+      <tr><th><code>after_agent</code></th><td>结束前一次</td><td>保存记忆、清理、记录日志</td></tr>
+    </tbody>
+  </table></div>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 286" role="img" aria-label="中间件执行顺序：before_model 按 A、B、C 顺序执行，after_model 按 C、B、A 逆序执行；wrap_model_call 像洋葱，A 在最外层包住 B，B 包住 C，C 包住模型调用">
+<foreignObject x="10" y="4" width="600" height="24"><div class="fo" style="align-items:flex-start"><span style="font-weight:700">节点钩子：before 按列表顺序，after 逆序</span></div></foreignObject>
+<rect class="b-ref" x="10" y="32" width="118" height="44" rx="6"/><foreignObject x="10" y="32" width="118" height="44"><div class="fo"><span><code>A.before_model</code></span></div></foreignObject>
+<line class="ln arr" x1="128" y1="54" x2="146" y2="54"/>
+<rect class="b-ref" x="148" y="32" width="118" height="44" rx="6"/><foreignObject x="148" y="32" width="118" height="44"><div class="fo"><span><code>B.before_model</code></span></div></foreignObject>
+<line class="ln arr" x1="266" y1="54" x2="284" y2="54"/>
+<rect class="b-ref" x="286" y="32" width="118" height="44" rx="6"/><foreignObject x="286" y="32" width="118" height="44"><div class="fo"><span><code>C.before_model</code></span></div></foreignObject>
+<line class="ln arr" x1="404" y1="54" x2="422" y2="54"/>
+<rect class="b-tok" x="424" y="32" width="118" height="44" rx="6"/><foreignObject x="424" y="32" width="118" height="44"><div class="fo"><span>模型调用</span></div></foreignObject>
+<line class="ln arr" x1="542" y1="54" x2="560" y2="54"/>
+<rect class="b-ref" x="562" y="32" width="118" height="44" rx="6"/><foreignObject x="562" y="32" width="118" height="44"><div class="fo"><span><code>C.after_model</code></span></div></foreignObject>
+<line class="ln arr" x1="680" y1="54" x2="698" y2="54"/>
+<rect class="b-ref" x="700" y="32" width="118" height="44" rx="6"/><foreignObject x="700" y="32" width="118" height="44"><div class="fo"><span><code>B.after_model</code></span></div></foreignObject>
+<line class="ln arr" x1="818" y1="54" x2="836" y2="54"/>
+<rect class="b-ref" x="838" y="32" width="118" height="44" rx="6"/><foreignObject x="838" y="32" width="118" height="44"><div class="fo"><span><code>A.after_model</code></span></div></foreignObject>
+<foreignObject x="10" y="96" width="600" height="24"><div class="fo" style="align-items:flex-start"><span style="font-weight:700"><code>wrap_model_call</code>：第一个在最外层</span></div></foreignObject>
+<rect class="b-ref" x="270.0" y="126" width="420" height="150" rx="10" style="fill-opacity:.55"/>
+<foreignObject x="274.0" y="128" width="60" height="22"><div class="fo" style="align-items:flex-start"><span class="fs">A</span></div></foreignObject>
+<rect class="b-seq" x="330.0" y="144" width="300" height="114" rx="10" style="fill-opacity:.55"/>
+<foreignObject x="334.0" y="146" width="60" height="22"><div class="fo" style="align-items:flex-start"><span class="fs">B</span></div></foreignObject>
+<rect class="b-pos" x="390.0" y="162" width="180" height="78" rx="10" style="fill-opacity:.55"/>
+<foreignObject x="394.0" y="164" width="60" height="22"><div class="fo" style="align-items:flex-start"><span class="fs">C</span></div></foreignObject>
+<rect class="b-tok" x="440" y="180" width="80" height="40" rx="6"/><foreignObject x="440" y="180" width="80" height="40"><div class="fo"><span>模型</span></div></foreignObject>
+<line class="ln arr" x1="140" y1="188" x2="268" y2="188"/>
+<foreignObject x="20" y="170" width="130" height="22"><div class="fo"><span class="fs">请求 A → B → C</span></div></foreignObject>
+<line class="ln arr" x1="692" y1="212" x2="810" y2="212"/>
+<foreignObject x="700" y="216" width="150" height="22"><div class="fo"><span class="fs">响应 C → B → A</span></div></foreignObject>
+<foreignObject x="712" y="140" width="250" height="40"><div class="fo" style="align-items:flex-start;text-align:left"><span class="fs">每层拿到 <code>request</code> 和 <code>handler</code>：可以改请求、多次调用 <code>handler</code>（重试）或不调用（短路）</span></div></foreignObject>
+</svg>
+    </div>
+    <figcaption><code>middleware=[A, B, C]</code> 时的执行顺序。<code>before_*</code> 按列表顺序；<code>after_*</code> 按相反顺序；<code>wrap_*</code> 像洋葱，列表里第一个在最外层。源码注释原话是“first in list becomes outermost layer”。</figcaption>
+  </figure>
+  <h3>常用内置中间件</h3>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th>中间件</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><th><code>SummarizationMiddleware</code></th><td>历史超过 token 或消息数阈值时，把旧消息总结成一条，保留最近若干条</td></tr>
+      <tr><th><code>HumanInTheLoopMiddleware</code></th><td>指定的工具调用前暂停，等人决定：<code>approve</code>、<code>edit</code>、<code>reject</code>、<code>respond</code>（替工具直接回答）</td></tr>
+      <tr><th><code>ModelCallLimitMiddleware</code>、<code>ToolCallLimitMiddleware</code></th><td>限制每个线程或每次运行的调用次数，防止死循环烧钱</td></tr>
+      <tr><th><code>ModelRetryMiddleware</code>、<code>ToolRetryMiddleware</code>、<code>ModelFallbackMiddleware</code></th><td>指数退避重试；主模型失败时换备用模型</td></tr>
+      <tr><th><code>PIIMiddleware</code></th><td>识别邮箱、卡号等敏感信息，脱敏、遮盖或拦截</td></tr>
+      <tr><th><code>LLMToolSelectorMiddleware</code></th><td>工具很多时先用小模型挑出相关的几个，再交给主模型</td></tr>
+      <tr><th><code>ContextEditingMiddleware</code></th><td>清理早期的工具结果，给上下文腾地方</td></tr>
+      <tr><th><code>TodoListMiddleware</code>、<code>ShellToolMiddleware</code>、<code>FilesystemFileSearchMiddleware</code></th><td>给 agent 加待办清单、shell、文件搜索工具</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">中间件可以声明自己的状态字段（自定义 <code>state_schema</code>），这些字段会合并进图的 State。例如调用计数就存在状态里，有 checkpointer 时跨轮次保留。</p>
+</section>
+
+<section id="graph" class="stack">
+  <div class="sec-head"><span class="eyebrow">LangGraph 核心</span><h2>StateGraph：State、Node、Edge</h2></div>
+  <p>LangGraph 的口号是“节点干活，边决定下一步”。写一张图分四步：定义 State，加节点，连边，<code>compile()</code>。</p>
+<pre><code>import operator
+from typing import Annotated, TypedDict
+from langgraph.graph import StateGraph, START, END
+from langgraph.types import Send, Command
+
+class State(TypedDict):
+    question: str                                   <span class="cm"># 没写 reducer：新值覆盖旧值</span>
+    docs: Annotated[list[str], operator.add]        <span class="cm"># reducer：多个节点的写入拼接</span>
+    draft: str
+    rounds: int
+
+def planner(s): return {"rounds": 0}
+def search_a(s): return {"docs": ["A 的结果"]}
+def search_b(s): return {"docs": ["B 的结果"]}
+def writer(s):   return {"draft": "..."}
+def reviewer(s): return {"rounds": s["rounds"] + 1}
+
+g = StateGraph(State)
+for name, fn in [("planner", planner), ("search_a", search_a), ("search_b", search_b),
+                 ("writer", writer), ("reviewer", reviewer)]:
+    g.add_node(name, fn)
+g.add_edge(START, "planner")
+g.add_edge("planner", "search_a"); g.add_edge("planner", "search_b")   <span class="cm"># 扇出：并行</span>
+g.add_edge(["search_a", "search_b"], "writer")                         <span class="cm"># 扇入：两个都完成才跑</span>
+g.add_edge("writer", "reviewer")
+g.add_conditional_edges("reviewer", lambda s: "writer" if s["rounds"] &lt; 3 else END)
+graph = g.compile(checkpointer=InMemorySaver())</code></pre>
+  <div class="grid2">
+    <div class="pt"><h3>State 与 reducer</h3>
+      <p>节点不改状态，只<b>返回更新</b>（一个字典）。每个字段是一个通道（channel），默认规则是覆盖；用 <code>Annotated[类型, reducer]</code> 指定合并函数，签名是 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi><mo stretchy="false">(</mo><mtext>旧值</mtext><mo separator="true">,</mo><mtext>更新</mtext><mo stretchy="false">)</mo><mo>→</mo><mtext>新值</mtext></mrow><annotation encoding="application/x-tex">r(\text{旧值}, \text{更新}) \to \text{新值}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">旧值</span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord text"><span class="mord cjk_fallback">更新</span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord text"><span class="mord cjk_fallback">新值</span></span></span></span></span>。消息列表用 <code>add_messages</code>：按消息 id 追加或替换，还能用 <code>RemoveMessage</code> 删除。<code>MessagesState</code> 是预置的只含 <code>messages</code> 的状态。</p></div>
+    <div class="pt"><h3>边的几种写法</h3>
+      <p>普通边 <code>add_edge</code>；条件边 <code>add_conditional_edges</code>，路由函数返回节点名、节点名列表（扇出）或 <code>Send</code> 列表；<code>START</code>、<code>END</code> 是虚拟节点。等待多个上游用 <code>add_edge([a, b], c)</code>，否则 <code>c</code> 会在任一上游完成时就被触发。</p></div>
+    <div class="pt"><h3>Send：运行时决定扇出数量</h3>
+      <p><code>Send("worker", {"item": x})</code> 让一个节点以自定义输入跑一次。返回 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> 个 <code>Send</code> 就有 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> 个并行任务，<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> 在运行时才确定，适合 map-reduce：比如每个子问题一个检索任务，结果用 reducer 汇总。</p></div>
+    <div class="pt"><h3>Command：更新和跳转一起做</h3>
+      <p>节点返回 <code>Command(update={...}, goto="next")</code>，同时改状态和指定下一个节点，不用再写条件边；<code>graph=Command.PARENT</code> 从子图跳到父图的节点，多智能体交接就靠它；<code>Command(resume=...)</code> 作为输入恢复被中断的图。返回类型要标注 <code>Command[Literal[...]]</code>，图才能画出这些边。</p></div>
+  </div>
+  <p>其他要点：<code>input_schema</code>、<code>output_schema</code> 可以让图的输入输出只暴露部分字段；<code>context_schema</code> 定义不进状态的运行时上下文（用户 id、数据库连接），节点通过 <code>Runtime</code> 读取；<code>add_node</code> 可以配 <code>RetryPolicy</code>、<code>CachePolicy</code>，1.2 起还能配超时和错误处理。除了图写法，还有 Functional API：<code>@entrypoint</code> 包住一个普通函数，<code>@task</code> 标记可并行、结果会被存档的步骤，适合不想画图的场景，运行时是同一个。</p>
+</section>
+
+<section id="pregel" class="stack">
+  <div class="sec-head"><span class="eyebrow">运行时</span><h2>执行模型：Pregel 风格的 super-step</h2></div>
+  <p>LangGraph 的运行时叫 Pregel，名字来自 Google 2010 年的大规模图计算系统，思想是 BSP（bulk synchronous parallel，整体同步并行）。图的执行被切成一个个 <b>super-step</b>，每一步分三个阶段：</p>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 228" role="img" aria-label="一个 super-step 的三个阶段：规划阶段决定激活哪些节点；执行阶段节点 a 和 b 并行运行，都读取本步开始时的快照；更新阶段按 reducer 合并它们的写入并保存 checkpoint，然后进入下一步">
+<rect class="b-io" x="10" y="60" width="150" height="70" rx="6"/><foreignObject x="10" y="60" width="150" height="70"><div class="fo"><span>规划</span><span class="fs">看哪些通道上一步被更新，<br>激活订阅它们的节点</span></div></foreignObject>
+<rect class="ghost" x="190" y="14" width="250" height="166" rx="8"/><foreignObject x="190" y="16" width="250" height="22"><div class="fo"><span class="fs">执行：并行，都读快照 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>S</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">S_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></div></foreignObject>
+<rect class="b-tok" x="210" y="44" width="210" height="52" rx="6"/><foreignObject x="210" y="44" width="210" height="52"><div class="fo"><span>节点 <code>a</code></span><span class="fs">返回 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="normal">Δ</mi><mi>a</mi></msub></mrow><annotation encoding="application/x-tex">\Delta_a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></div></foreignObject>
+<rect class="b-tok" x="210" y="112" width="210" height="52" rx="6"/><foreignObject x="210" y="112" width="210" height="52"><div class="fo"><span>节点 <code>b</code></span><span class="fs">返回 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="normal">Δ</mi><mi>b</mi></msub></mrow><annotation encoding="application/x-tex">\Delta_b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></div></foreignObject>
+<rect class="b-seq" x="470" y="60" width="170" height="70" rx="6"/><foreignObject x="470" y="60" width="170" height="70"><div class="fo"><span>更新</span><span class="fs">按 reducer 合并<br><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>S</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mi>S</mi><mi>t</mi></msub><mo>⊕</mo><msub><mi mathvariant="normal">Δ</mi><mi>a</mi></msub><mo>⊕</mo><msub><mi mathvariant="normal">Δ</mi><mi>b</mi></msub></mrow><annotation encoding="application/x-tex">S_{t+1}=S_t\oplus\Delta_a\oplus\Delta_b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8917em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊕</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊕</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></div></foreignObject>
+<rect class="b-pos" x="670" y="60" width="130" height="70" rx="6"/><foreignObject x="670" y="60" width="130" height="70"><div class="fo"><span>存 checkpoint</span><span class="fs">step <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span></span></span></span></span></div></foreignObject>
+<line class="ln arr" x1="160" y1="95" x2="206" y2="70"/>
+<line class="ln arr" x1="160" y1="95" x2="206" y2="138"/>
+<line class="ln arr" x1="420" y1="70" x2="466" y2="90"/>
+<line class="ln arr" x1="420" y1="138" x2="466" y2="104"/>
+<line class="ln arr" x1="640" y1="95" x2="666" y2="95"/>
+<path class="ln arr" d="M800,95 L840,95 L840,200 L85,200 L85,132"/>
+<foreignObject x="520" y="202" width="300" height="22"><div class="fo"><span class="fs">进入下一个 super-step，没有激活节点就结束</span></div></foreignObject>
+<foreignObject x="820" y="20" width="130" height="70"><div class="fo" style="align-items:flex-start;text-align:left"><span class="fs">某个节点失败时，同一步成功节点的写入作为 pending writes 保存</span></div></foreignObject>
+</svg>
+    </div>
+    <figcaption>节点读的是本步开始时的状态快照，互相看不到对方本步的写入。所有写入在步末按 reducer 统一合并，然后才决定下一步激活谁，并存一个 checkpoint。</figcaption>
+  </figure>
+  <p>形式化地写，设第 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span></span></span></span> 步激活的节点集合是 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>A</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">A_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span>，节点 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> 读快照 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>S</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">S_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span> 返回更新 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="normal">Δ</mi><mi>n</mi></msub></mrow><annotation encoding="application/x-tex">\Delta_n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span>，字段 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span> 的 reducer 是 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">r_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span>。对 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>A</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">A_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span> 中每个写了 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span> 的节点 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>n</mi><mn>1</mn></msub><mo separator="true">,</mo><msub><mi>n</mi><mn>2</mn></msub><mo separator="true">,</mo><mo>…</mo></mrow><annotation encoding="application/x-tex">n_1,n_2,\dots</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span></span></span></span>，依次合并：</p>
+  <span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>S</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">[</mo><mi>k</mi><mo stretchy="false">]</mo><mo>=</mo><msub><mi>r</mi><mi>k</mi></msub><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo><msub><mi>r</mi><mi>k</mi></msub><mo stretchy="false">(</mo><msub><mi>S</mi><mi>t</mi></msub><mo stretchy="false">[</mo><mi>k</mi><mo stretchy="false">]</mo><mo separator="true">,</mo><mtext> </mtext><msub><mi mathvariant="normal">Δ</mi><msub><mi>n</mi><mn>1</mn></msub></msub><mo stretchy="false">[</mo><mi>k</mi><mo stretchy="false">]</mo><mo stretchy="false">)</mo><mo separator="true">,</mo><mtext> </mtext><msub><mi mathvariant="normal">Δ</mi><msub><mi>n</mi><mn>2</mn></msub></msub><mo stretchy="false">[</mo><mi>k</mi><mo stretchy="false">]</mo><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">)</mo><mo>⋯</mo></mrow><annotation encoding="application/x-tex">S_{t+1}[k] = r_k\big(r_k(S_t[k],\,\Delta_{n_1}[k]),\,\Delta_{n_2}[k]\big)\cdots</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="delimsizing size1">(</span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">]</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">])</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">]</span><span class="mord"><span class="delimsizing size1">)</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">⋯</span></span></span></span></span>
+  <p>没配 reducer 的字段相当于“只能接收一个值”：同一步里两个节点写同一个字段就抛 <code>InvalidUpdateError</code>，因为覆盖顺序无法确定。这是面试最常问的并行坑。</p>
+  <div class="grid2">
+    <div class="pt"><h3>这样设计的好处</h3>
+      <ul><li><b>确定性</b>：并行节点互不干扰，合并顺序由 reducer 决定，结果可复现。</li>
+      <li><b>天然的存档点</b>：每个 super-step 结束时状态一致，正好存 checkpoint。</li>
+      <li><b>失败只重跑失败的</b>：同一步里成功节点的写入作为 pending writes 先存下来，恢复时不用重跑。</li></ul></div>
+    <div class="pt"><h3>recursion limit</h3>
+      <p>限制的是一次运行的 <b>super-step 数</b>，不是节点调用次数。超过就抛 <code>GraphRecursionError</code>。默认值在 1.0.6 之前是 25，1.0.6 起改成 10000，1.1.4 起是 10007，可以用环境变量 <code>LANGGRAPH_DEFAULT_RECURSION_LIMIT</code> 改，也可以在 config 顶层传 <code>recursion_limit</code>（不是放在 <code>configurable</code> 里）。老面经里“默认 25”的说法已经过时。</p></div>
+  </div>
+</section>
+
+<section id="lab1" class="stack">
+  <div class="sec-head"><span class="eyebrow">交互实验</span><h2>super-step 实验：并行、reducer 与 recursion limit</h2></div>
+  <p>就是上面那张图：<code>planner</code> 扇出到两个检索节点，扇入到 <code>writer</code>，<code>reviewer</code> 要求返工就回到 <code>writer</code>。逐步执行，看每个 super-step 激活了谁、状态怎么变、存了哪个 checkpoint。表里的 step、next 和报错信息与 langgraph 1.2.20 实际运行的结果一致。</p>
+  <div class="lab">
+    <div class="row">
+      <div class="seg" id="aR" role="group" aria-label="docs 字段"></div>
+      <label class="fld"><span>reviewer 要求返工次数</span><input id="aN" type="number" value="1" min="0" max="4" step="1"></label>
+      <label class="fld"><span>recursion limit</span><input id="aL" type="number" value="25" min="1" max="99" step="1"></label>
+    </div>
+    <div class="row">
+      <button type="button" id="aStep">下一个 super-step</button><button type="button" id="aRun">跑完</button><button type="button" id="aReset">重置</button>
+    </div>
+    <div class="scroll"><svg class="dg" id="aPlot" viewBox="0 0 900 170" role="img" aria-label="示例图：START 到 planner，planner 并行到 search_a 和 search_b，两者汇合到 writer，writer 到 reviewer，reviewer 回到 writer 或结束"></svg></div>
+    <div class="tbl"><table style="min-width:640px"><thead><tr><th>step</th><th>本步执行</th><th>checkpoint 里的状态</th><th>next</th></tr></thead><tbody id="aOut"></tbody></table></div>
+    <div class="verdict" id="aVerdict"></div>
+  </div>
+  <p class="note">可以试试：把 docs 切到“不带 reducer”，第 2 步两个检索节点同时写 <code>docs</code>，直接报错，而且第 2 步的 checkpoint 不会存下来；返工 1 次一共有 7 个 super-step（含 <code>__start__</code>），把 limit 设成 6 就会报 <code>GraphRecursionError</code>，设成 7 刚好跑完。</p>
+</section>
+
+<section id="persist" class="stack">
+  <div class="sec-head"><span class="eyebrow">LangGraph 核心</span><h2>持久化：checkpointer、thread 与 store</h2></div>
+  <p>编译时传入 checkpointer，每个 super-step 结束后把完整状态存成一个 checkpoint，按 <code>thread_id</code> 分组。同一个 <code>thread_id</code> 再次调用会接着上次的状态跑，这就是多轮对话的“短期记忆”。</p>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th>概念</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><th>thread</th><td>一串 checkpoint 的集合，用 <code>config["configurable"]["thread_id"]</code> 指定，通常对应一个会话</td></tr>
+      <tr><th>checkpoint</th><td>某个 super-step 结束时的快照，<code>StateSnapshot</code> 字段有 <code>values</code>、<code>next</code>、<code>config</code>（含 <code>checkpoint_id</code>）、<code>metadata</code>（<code>source</code>、<code>step</code>）、<code>created_at</code>、<code>parent_config</code>、<code>tasks</code>、<code>interrupts</code></td></tr>
+      <tr><th>编号</th><td>输入是 step <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">-1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">1</span></span></span></span>（source 为 <code>input</code>，next 是 <code>__start__</code>），之后每个 super-step 一个，source 为 <code>loop</code>；<code>update_state</code> 产生的是 <code>update</code>，从旧 checkpoint 重跑产生的是 <code>fork</code></td></tr>
+      <tr><th>读写</th><td><code>get_state</code> 取最新；<code>get_state_history</code> 列出全部；<code>update_state(config, values, as_node=...)</code> 以某个节点的名义写入，会产生新 checkpoint</td></tr>
+      <tr><th>实现</th><td><code>InMemorySaver</code>（开发用，重启即丢）、<code>SqliteSaver</code>、<code>PostgresSaver</code>，还有 Redis、MongoDB 等社区实现；都有异步版本</td></tr>
+      <tr><th>durability</th><td>何时写入存储：<code>"sync"</code> 每步写完才进下一步，<code>"async"</code>（默认）下一步执行时异步写，<code>"exit"</code> 只在结束时写（快，但中途崩溃会丢进度）</td></tr>
+    </tbody>
+  </table></div>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 200" role="img" aria-label="checkpoint 历史是一棵树：主线 c0 到 c4；从 c2 用 update_state 修改金额后分出 c5、c6 一条新分支，原历史不变">
+<rect class="b-seq" x="10" y="40" width="104" height="56" rx="6"/><foreignObject x="10" y="40" width="104" height="56"><div class="fo"><span>c0</span><span class="fs">step <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">-1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">1</span></span></span></span><br><code>input</code></span></div></foreignObject>
+<line class="ln arr" x1="114" y1="68" x2="138" y2="68"/>
+<rect class="b-seq" x="140" y="40" width="104" height="56" rx="6"/><foreignObject x="140" y="40" width="104" height="56"><div class="fo"><span>c1</span><span class="fs">step 0<br>next <code>draft</code></span></div></foreignObject>
+<line class="ln arr" x1="244" y1="68" x2="268" y2="68"/>
+<rect class="b-ref" x="270" y="40" width="104" height="56" rx="6"/><foreignObject x="270" y="40" width="104" height="56"><div class="fo"><span>c2</span><span class="fs">step 1<br>next <code>approve</code></span></div></foreignObject>
+<line class="ln arr" x1="374" y1="68" x2="398" y2="68"/>
+<rect class="b-seq" x="400" y="40" width="104" height="56" rx="6"/><foreignObject x="400" y="40" width="104" height="56"><div class="fo"><span>c3</span><span class="fs">step 2<br>next <code>execute</code></span></div></foreignObject>
+<line class="ln arr" x1="504" y1="68" x2="528" y2="68"/>
+<rect class="b-seq" x="530" y="40" width="104" height="56" rx="6"/><foreignObject x="530" y="40" width="104" height="56"><div class="fo"><span>c4</span><span class="fs">step 3<br>结束</span></div></foreignObject>
+<path class="ln arr" d="M322.0,96 L322.0,160 L398,160"/>
+<rect class="b-tok" x="400" y="132" width="104" height="56" rx="6"/><foreignObject x="400" y="132" width="104" height="56"><div class="fo"><span>c5</span><span class="fs"><code>update</code><br>amount 改成 50</span></div></foreignObject>
+<line class="ln arr" x1="504" y1="160" x2="528" y2="160"/>
+<rect class="b-tok" x="530" y="132" width="104" height="56" rx="6"/><foreignObject x="530" y="132" width="104" height="56"><div class="fo"><span>c6</span><span class="fs">新分支继续</span></div></foreignObject>
+<foreignObject x="10" y="110" width="250" height="60"><div class="fo" style="align-items:flex-start;text-align:left"><span class="fs"><code>update_state(c2 的 config, {...})</code> 在 c2 后面接一个新 checkpoint，再 <code>invoke(None, 新 config)</code></span></div></foreignObject>
+<foreignObject x="700" y="38" width="250" height="90"><div class="fo" style="align-items:flex-start;text-align:left"><span class="fs">回放：<code>invoke(None, c2 的 config)</code>，c2 之前的步骤不重跑，从 <code>approve</code> 开始重新执行，并产生 source 为 <code>fork</code> 的新 checkpoint</span></div></foreignObject>
+</svg>
+    </div>
+    <figcaption>时间旅行：拿历史上任意一个 checkpoint 的 config 调 <code>invoke(None, config)</code>，它之前的步骤不重跑，之后的步骤重新执行；先 <code>update_state</code> 改状态再跑，就从那里分出一条新分支。原来的 checkpoint 不会被覆盖，用来调试“如果当时模型换个选择会怎样”。</figcaption>
+  </figure>
+  <div class="grid2">
+    <div class="pt"><h3>checkpointer 带来的能力</h3>
+      <ul><li><b>记忆</b>：同一 thread 多轮对话。</li>
+      <li><b>人在环中</b>：<code>interrupt</code> 必须有 checkpointer，暂停时状态存下来，人可以隔几天再回来恢复。</li>
+      <li><b>时间旅行</b>：回放、分叉、调试。</li>
+      <li><b>容错</b>（durable execution）：进程崩溃后用同一个 thread 继续，已完成的 super-step 不重跑。</li></ul></div>
+    <div class="pt"><h3>Store：跨 thread 的长期记忆</h3>
+      <p>checkpoint 只属于一个 thread。用户偏好这类要跨会话的信息放在 <code>Store</code>（<code>BaseStore</code>）里：按 namespace 元组（比如 <code>("memories", user_id)</code>）组织键值，<code>put</code>、<code>get</code>、<code>search</code>，配了 embedding 可以做语义检索。编译时传 <code>store=</code>，节点通过 <code>runtime.store</code> 访问。</p></div>
+  </div>
+  <p class="note">checkpoint 存的是完整状态，长对话里会越来越大。1.2 引入了 beta 的 <code>DeltaChannel</code>：消息这类只增长的字段每步只存增量，每隔 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>K</mi></mrow><annotation encoding="application/x-tex">K</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span></span></span></span> 步存一次完整快照；生产环境还要定期清理旧 checkpoint。</p>
+</section>
+
+<section id="hitl" class="stack">
+  <div class="sec-head"><span class="eyebrow">LangGraph 核心</span><h2>人在环中：<code>interrupt</code> 与 <code>Command(resume=...)</code></h2></div>
+<pre><code>from langgraph.types import interrupt, Command
+
+def approve(state):
+    decision = interrupt({"question": "批准退款吗？", "amount": state["amount"]})
+    return {"decision": decision}
+
+graph.invoke({"amount": 300}, config)              <span class="cm"># 跑到 interrupt 停下，返回值里有 __interrupt__</span>
+graph.invoke(Command(resume="yes"), config)        <span class="cm"># 同一个 thread_id，带着人的答复恢复</span></code></pre>
+  <p>第一次调用 <code>interrupt()</code> 时抛出一个特殊异常，运行时捕获后把状态存档、把参数交给调用方，图停在这个节点。恢复时 <b>整个节点从头重新执行</b>，执行到 <code>interrupt()</code> 时不再暂停，而是直接返回 <code>resume</code> 的值。这带来三条规则：</p>
+  <ul>
+    <li><b>interrupt 之前不要放有副作用的操作</b>（发通知、扣款、写库），否则恢复时会再执行一次。要么放到 interrupt 之后，要么放到单独的节点，要么保证幂等。</li>
+    <li>一个节点里有多个 <code>interrupt()</code> 时，按调用顺序和 resume 值一一对应，所以不能把 interrupt 放在顺序会变的条件分支里。</li>
+    <li>不要用 <code>try/except Exception</code> 包住 <code>interrupt()</code>，否则暂停用的异常被吞掉，图不会停下来。</li>
+  </ul>
+  <p>另一种暂停方式是静态断点：编译时传 <code>interrupt_before=["node"]</code> 或 <code>interrupt_after</code>，主要用于调试。LangChain 的 <code>HumanInTheLoopMiddleware</code> 也是基于 <code>interrupt()</code>：默认的批量模式在 <code>after_model</code> 里把本轮所有需要审批的工具调用合成一次中断；1.4.6 起可以设 <code>interrupt_mode="per_call"</code>，在 <code>wrap_tool_call</code> 里每个工具调用单独中断、单独回答，每个中断带一个 <code>response_schema</code>，答复保存前先校验，官方计划在下一个大版本把它设为默认。</p>
+</section>
+
+<section id="lab2" class="stack">
+  <div class="sec-head"><span class="eyebrow">交互实验</span><h2>中断实验：暂停、恢复、回放与分叉</h2></div>
+  <p>退款流程：<code>draft</code> 生成退款单，<code>approve</code> 里先“发通知”再 <code>interrupt()</code> 等人批准，批准则 <code>execute</code> 执行。按按钮操作同一个 thread，下面列出 thread 里的全部 checkpoint。每一步的 step、source、parent 都和 langgraph 1.2.20 实际运行的结果一致。</p>
+  <div class="lab">
+    <div class="row">
+      <div class="seg" id="bPos" role="group" aria-label="通知的位置"></div>
+    </div>
+    <div class="row">
+      <button type="button" id="bRun">运行（金额 300）</button><button type="button" id="bYes">批准</button><button type="button" id="bNo">拒绝</button><button type="button" id="bReplay">从 c2 回放</button><button type="button" id="bFork">把 c2 的金额改成 50 再跑</button><button type="button" id="bReset">重置</button>
+    </div>
+    <div class="tbl"><table style="min-width:680px"><thead><tr><th>checkpoint</th><th>parent</th><th>step</th><th>source</th><th>状态</th><th>next</th><th>interrupt</th></tr></thead><tbody id="bOut"></tbody></table></div>
+    <div class="tbl" id="bLogW"><table style="min-width:0"><tbody id="bLog"></tbody></table></div>
+    <div class="verdict" id="bVerdict"></div>
+  </div>
+</section>
+
+<section id="stream" class="stack">
+  <div class="sec-head"><span class="eyebrow">LangGraph 核心</span><h2>流式输出的几种模式</h2></div>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th><code>stream_mode</code></th><th>每个事件是什么</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><th><code>values</code></th><td>每个 super-step 后的完整状态</td><td>调试，看状态变化</td></tr>
+      <tr><th><code>updates</code></th><td>每个节点返回的更新</td><td>展示“执行到哪一步了”</td></tr>
+      <tr><th><code>messages</code></th><td>模型输出的 token 片段和元数据（哪个节点产生的）</td><td>聊天界面打字机效果</td></tr>
+      <tr><th><code>custom</code></th><td>节点里用 stream writer 主动发的任意数据</td><td>进度条、工具的中间结果</td></tr>
+      <tr><th><code>checkpoints</code>、<code>tasks</code>、<code>debug</code></th><td>checkpoint 事件、任务开始和结束事件，以及两者的合集</td><td>调试、可观测性</td></tr>
+    </tbody>
+  </table></div>
+  <p>可以传列表同时订阅多种模式；<code>subgraphs=True</code> 时子图内部的事件也会带着命名空间发出来。1.1 起 <code>stream(..., version="v2")</code> 统一返回带 <code>type</code>、<code>ns</code>、<code>data</code> 的 <code>StreamPart</code>，<code>invoke(..., version="v2")</code> 返回带 <code>.value</code> 和 <code>.interrupts</code> 的 <code>GraphOutput</code>；1.2 又加了 beta 的 v3 事件流，可以按通道分别取值和消息。</p>
+</section>
+
+<section id="multi" class="stack">
+  <div class="sec-head"><span class="eyebrow">进阶</span><h2>子图与多智能体</h2></div>
+  <p><b>子图</b>：编译好的图本身就是一个 Runnable，可以直接作为父图的节点。父子状态有同名字段时直接共享；字段不同时，在节点函数里手动调用子图并转换输入输出。子图可以有自己的 checkpoint 命名空间，<code>Command(graph=Command.PARENT, goto=...)</code> 从子图跳回父图。多智能体本质上就是“每个 agent 是一个子图或一个节点”。</p>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 240" role="img" aria-label="四种多智能体模式：Subagents 主 agent 把子 agent 当工具调用；Handoffs 多个 agent 轮流接管对话；Skills 单个 agent 按需加载技能；Router 先路由再并行分发给专家并汇总">
+<rect class="ghost" x="6" y="6" width="232" height="228" rx="8"/>
+<foreignObject x="6" y="10" width="232" height="24"><div class="fo"><span style="font-weight:700">Subagents</span></div></foreignObject>
+<rect class="ghost" x="244" y="6" width="232" height="228" rx="8"/>
+<foreignObject x="244" y="10" width="232" height="24"><div class="fo"><span style="font-weight:700">Handoffs</span></div></foreignObject>
+<rect class="ghost" x="482" y="6" width="232" height="228" rx="8"/>
+<foreignObject x="482" y="10" width="232" height="24"><div class="fo"><span style="font-weight:700">Skills</span></div></foreignObject>
+<rect class="ghost" x="720" y="6" width="232" height="228" rx="8"/>
+<foreignObject x="720" y="10" width="232" height="24"><div class="fo"><span style="font-weight:700">Router</span></div></foreignObject>
+<rect class="b-tok" x="62" y="44" width="120" height="40" rx="6"/><foreignObject x="62" y="44" width="120" height="40"><div class="fo"><span>主 agent</span></div></foreignObject>
+<rect class="b-seq" x="18" y="150" width="64" height="40" rx="6"/><foreignObject x="18" y="150" width="64" height="40"><div class="fo"><span>子 1</span></div></foreignObject>
+<line class="ln arr" x1="122" y1="84" x2="50" y2="148"/>
+<rect class="b-seq" x="90" y="150" width="64" height="40" rx="6"/><foreignObject x="90" y="150" width="64" height="40"><div class="fo"><span>子 2</span></div></foreignObject>
+<line class="ln arr" x1="122" y1="84" x2="122" y2="148"/>
+<rect class="b-seq" x="162" y="150" width="64" height="40" rx="6"/><foreignObject x="162" y="150" width="64" height="40"><div class="fo"><span>子 3</span></div></foreignObject>
+<line class="ln arr" x1="122" y1="84" x2="194" y2="148"/>
+<foreignObject x="12" y="194" width="220" height="36"><div class="fo"><span class="fs">子 agent 当工具调用，只把结果交回</span></div></foreignObject>
+<rect class="b-io" x="320" y="40" width="80" height="34" rx="6"/><foreignObject x="320" y="40" width="80" height="34"><div class="fo"><span>用户</span></div></foreignObject>
+<rect class="b-tok" x="258" y="130" width="64" height="40" rx="6"/><foreignObject x="258" y="130" width="64" height="40"><div class="fo"><span>agent 1</span></div></foreignObject>
+<rect class="b-seq" x="328" y="130" width="64" height="40" rx="6"/><foreignObject x="328" y="130" width="64" height="40"><div class="fo"><span>agent 2</span></div></foreignObject>
+<rect class="b-seq" x="398" y="130" width="64" height="40" rx="6"/><foreignObject x="398" y="130" width="64" height="40"><div class="fo"><span>agent 3</span></div></foreignObject>
+<line class="ln arr" x1="360" y1="74" x2="294" y2="128"/>
+<path class="ln arr" d="M290,172 Q326,200 358,172"/>
+<path class="ln arr" d="M360,172 Q396,200 428,172"/>
+<foreignObject x="250" y="194" width="220" height="36"><div class="fo"><span class="fs">工具调用改“当前 agent”字段，下一轮由新 agent 回答</span></div></foreignObject>
+<rect class="b-tok" x="538" y="110" width="120" height="44" rx="6"/><foreignObject x="538" y="110" width="120" height="44"><div class="fo"><span>单个 agent</span></div></foreignObject>
+<rect class="ghost" x="494" y="44" width="64" height="36" rx="6"/><foreignObject x="494" y="44" width="64" height="36"><div class="fo"><span class="fs">技能 1</span></div></foreignObject>
+<line class="ln arr" x1="526" y1="80" x2="598" y2="108"/>
+<rect class="ghost" x="566" y="44" width="64" height="36" rx="6"/><foreignObject x="566" y="44" width="64" height="36"><div class="fo"><span class="fs">技能 2</span></div></foreignObject>
+<line class="ln arr" x1="598" y1="80" x2="598" y2="108"/>
+<rect class="ghost" x="638" y="44" width="64" height="36" rx="6"/><foreignObject x="638" y="44" width="64" height="36"><div class="fo"><span class="fs">技能 3</span></div></foreignObject>
+<line class="ln arr" x1="670" y1="80" x2="598" y2="108"/>
+<foreignObject x="488" y="170" width="220" height="56"><div class="fo"><span class="fs">需要时把领域提示词、资料加载进上下文，加载后一直留着</span></div></foreignObject>
+<rect class="b-io" x="786" y="40" width="100" height="34" rx="6"/><foreignObject x="786" y="40" width="100" height="34"><div class="fo"><span>输入</span></div></foreignObject>
+<rect class="b-ref" x="786" y="90" width="100" height="34" rx="6"/><foreignObject x="786" y="90" width="100" height="34"><div class="fo"><span>路由</span></div></foreignObject>
+<line class="ln arr" x1="836" y1="74" x2="836" y2="88"/>
+<rect class="b-seq" x="744" y="140" width="72" height="34" rx="6"/><foreignObject x="744" y="140" width="72" height="34"><div class="fo"><span>专家 1</span></div></foreignObject>
+<line class="ln arr" x1="836" y1="124" x2="780" y2="138"/>
+<rect class="b-seq" x="856" y="140" width="72" height="34" rx="6"/><foreignObject x="856" y="140" width="72" height="34"><div class="fo"><span>专家 2</span></div></foreignObject>
+<line class="ln arr" x1="836" y1="124" x2="892" y2="138"/>
+<foreignObject x="726" y="182" width="220" height="46"><div class="fo"><span class="fs">分类后并行分发，最后汇总；每个请求都要多一次路由调用</span></div></foreignObject>
+</svg>
+    </div>
+    <figcaption>LangChain 文档把多智能体归纳成四种模式，外加完全自定义的 LangGraph 工作流。2025 年的 <code>langgraph-supervisor</code>、<code>langgraph-swarm</code> 分别对应 supervisor 和 handoff 两种写法；supervisor 库的说明现在推荐多数场景直接用工具调用实现 supervisor 模式，便于控制上下文。</figcaption>
+  </figure>
+  <div class="tbl"><table style="min-width:720px">
+    <thead><tr><th>模式</th><th>怎么做</th><th>优点</th><th>代价</th></tr></thead>
+    <tbody>
+      <tr><th>Subagents（主 agent 调子 agent）</th><td>子 agent 包装成工具，主 agent 决定调谁、传什么</td><td>上下文隔离，子 agent 的中间过程不进主上下文；可以并行</td><td>子 agent 无状态，用户不能直接和它对话；多一层调用</td></tr>
+      <tr><th>Handoffs（交接）</th><td>工具调用改写一个“当前 agent”状态字段，路由到另一个 agent</td><td>适合直接面对用户的多角色对话，下一轮仍由当前 agent 接着处理</td><td>串行，不能并行；共享的历史越来越长</td></tr>
+      <tr><th>Skills（按需加载）</th><td>单个 agent，需要时把某个领域的提示词和资料加载进上下文</td><td>结构最简单，始终只有一个 agent 在控制</td><td>加载的内容一直留在上下文里，多领域任务 token 多</td></tr>
+      <tr><th>Router（路由）</th><td>先分类，再分发给一个或多个专门 agent，最后汇总</td><td>可并行，各领域上下文互不干扰</td><td>每次都要多一次路由调用；不适合多跳任务</td></tr>
+    </tbody>
+  </table></div>
+  <p>文档里给了一个多领域任务的测算：Subagents 约 9K token，Skills 约 15K token，差别来自上下文隔离。<b>Deep Agents</b> 就是 Subagents 模式的成品：<code>create_deep_agent</code> 预装文件系统工具（<code>ls</code>、<code>read_file</code>、<code>write_file</code>、<code>edit_file</code>、<code>glob</code>、<code>grep</code>，后端支持沙箱时还有 <code>execute</code>）、<code>task</code> 工具（派生子 agent，默认带一个通用子 agent）、自动上下文压缩，可选 skills、记忆、人工审批。0.7 起不再默认带待办清单工具，默认提示词也缩短了，一轮的输入 token 从 5395 降到 1895。</p>
+</section>
+
+<section id="new" class="stack">
+  <div class="sec-head"><span class="eyebrow">截至 2026.11</span><h2>2026 年的新变化</h2></div>
+  <div class="tbl"><table style="min-width:720px">
+    <thead><tr><th>版本</th><th>变化</th><th>为什么重要</th></tr></thead>
+    <tbody>
+      <tr><th>langgraph 1.1（2026.03）</th><td><code>version="v2"</code> 的 <code>stream</code>、<code>invoke</code>；输出自动转成 Pydantic 或 dataclass；修复带 interrupt 和子图的时间旅行</td><td>以前 <code>invoke</code> 返回的字典里混着 <code>__interrupt__</code>，类型不安全</td></tr>
+      <tr><th>langgraph 1.2（2026.05）</th><td><code>add_node(..., timeout=TimeoutPolicy(...))</code> 节点超时（仅异步节点）；<code>error_handler=</code> 节点级错误处理，可以返回 <code>Command</code> 改走降级路径；<code>RunControl.request_drain()</code> 优雅停机，本步跑完后停下并留下可恢复的 checkpoint；beta <code>DeltaChannel</code>；v3 事件流</td><td>长时间运行的 agent 在生产环境需要超时、降级、滚动发布时不丢进度</td></tr>
+      <tr><th>langchain 1.3–1.4（2026.05–10）</th><td>MCP 从 <code>langchain-mcp-adapters</code> 并入 <code>langchain.mcp</code>（beta，基于 FastMCP），<code>MCPAdapter</code> 取代 <code>MultiServerMCPClient</code>，MCP 的 elicitation 请求变成 LangGraph 的 <code>interrupt()</code>；人工审批支持 <code>per_call</code></td><td>MCP 工具和人工审批都接到了同一套 interrupt 机制上</td></tr>
+      <tr><th><code>langchain-core</code> 1.7（2026.10）</th><td>流式时工具调用参数改成只发增量的 <code>tool-call-delta</code> 事件；破坏性变化：遍历 <code>message.tool_calls</code> 得到的是参数片段，要拿完整解析结果用 <code>message.tool_calls.get()</code></td><td>升级时要先升客户端再升服务端，或者锁定 <code>langchain-core&lt;1.7.0</code></td></tr>
+      <tr><th>deepagents 0.4–0.7</th><td>Modal、Daytona、Runloop 沙箱；异步子 agent（需要 LangSmith Deployment）；代码解释器中间件（QuickJS）；按厂商或模型自动套用配置的 harness profile；0.7 精简默认提示词，去掉默认待办清单</td><td>从“示例项目”变成可用的 coding/research agent harness</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="cmp" class="stack">
+  <div class="sec-head"><span class="eyebrow">选型</span><h2>手写循环、<code>create_agent</code>、LangGraph、Deep Agents 怎么选</h2></div>
+  <div class="tbl"><table style="min-width:720px">
+    <thead><tr><th>方案</th><th>你写什么</th><th>适合</th><th>不适合</th></tr></thead>
+    <tbody>
+      <tr><th>直接调厂商 SDK 手写循环</th><td>几十行 while 循环，自己管消息和工具执行</td><td>简单 agent、只用一家模型、想完全掌控</td><td>需要持久化、暂停恢复、并行、换模型的时候都要自己补</td></tr>
+      <tr><th><code>create_agent</code> + 中间件</th><td>模型、工具、提示词、中间件列表</td><td>标准的工具调用 agent，要换模型、加审批、压缩、重试</td><td>流程本身不是“模型调工具”循环，比如固定步骤加少量判断</td></tr>
+      <tr><th>LangGraph StateGraph</th><td>状态、节点、边，流程完全自己设计</td><td>确定性步骤和 agent 混合、多 agent 协作、长时间运行、需要审批和审计</td><td>简单场景显得啰嗦，要理解 reducer、super-step、checkpoint</td></tr>
+      <tr><th>Deep Agents</th><td>工具、子 agent、skills、后端（文件或沙箱）</td><td>长任务：调研、写代码，需要规划、读写文件、派生子任务</td><td>延迟和成本敏感的短对话</td></tr>
+    </tbody>
+  </table></div>
+  <p>和其他框架比：OpenAI Agents SDK、Claude Agent SDK 这类厂商 SDK 更轻，围绕自家模型的 agent 循环和工具；CrewAI 用“角色、任务”这类高层概念组织多 agent；LlamaIndex 的强项在数据接入和检索。LangGraph 的定位是更底层、和模型厂商无关的编排运行时，差异化在于显式的状态图、checkpoint 和 interrupt。面试时不必贬低别的框架，讲清楚“需要什么能力才值得上图”即可。</p>
+</section>
+
+<section id="qa" class="stack">
+  <div class="sec-head"><span class="eyebrow">自测</span><h2>高频追问</h2></div>
+  <div class="tools"><button type="button" id="openAll">全部展开</button><button type="button" id="closeAll">全部收起</button></div>
+  <div class="qa">
+    <details><summary>LangChain 和 LangGraph 是什么关系？</summary><div class="ans">
+      <p>同一家公司的上下两层。LangGraph 是底层编排运行时，只依赖 <code>langchain-core</code>；LangChain 1.x 的 <code>create_agent</code> 编译出来就是一张 LangGraph 图。标准的工具调用 agent 用 LangChain，自定义流程用 LangGraph，可以把 <code>create_agent</code> 生成的 agent 当作 LangGraph 的一个节点。</p></div></details>
+    <details><summary>为什么有了 LCEL 还要 LangGraph？</summary><div class="ans">
+      <p>LCEL 表达的是有向无环的流水线，agent 需要循环、条件分支、并行后汇合、中途暂停等人、崩溃后续跑。LangGraph 显式支持环和条件边，并把状态、存档、中断做进运行时，这些用 Runnable 组合很难做干净。</p></div></details>
+    <details><summary>LangGraph 的 State 和 reducer 是什么？不配 reducer 会怎样？</summary><div class="ans">
+      <p>State 是图的共享状态，每个字段一个通道。节点返回更新，reducer 决定更新怎么和旧值合并，默认是覆盖。同一个 super-step 里两个并行节点写同一个没配 reducer 的字段，会抛 <code>InvalidUpdateError</code>（“Can receive only one value per step”）。消息字段用 <code>add_messages</code>，按 id 追加或替换。</p></div></details>
+    <details><summary>什么是 super-step？并行节点怎么执行？</summary><div class="ans">
+      <p>Pregel/BSP 模型的一步：规划本步激活哪些节点，并行执行（都读本步开始时的快照），步末按 reducer 合并写入并存 checkpoint。同一步的节点看不到彼此的写入。并行来自扇出边、返回多个节点名或多个 <code>Send</code>；扇入用 <code>add_edge([a, b], c)</code> 等所有上游完成。</p></div></details>
+    <details><summary>recursion limit 是什么？默认多少？</summary><div class="ans">
+      <p>一次运行允许的 super-step 上限，超过抛 <code>GraphRecursionError</code>，防止死循环。老版本默认 25，1.0.6 起 10000，1.1.4 起 10007；<code>create_agent</code> 自己设为 9999。注意它数的是 super-step 而不是节点次数，<code>__start__</code> 也占一步；业务上更应该用调用次数限制中间件或在状态里计数。</p></div></details>
+    <details><summary><code>Send</code> 和 <code>Command</code> 分别解决什么问题？</summary><div class="ans">
+      <p><code>Send</code> 解决“运行时才知道要并行几个”：路由函数返回若干 <code>Send(node, input)</code>，每个是独立任务、有自己的输入，用于 map-reduce。<code>Command</code> 解决“更新状态和决定去向写在一起”：节点返回 <code>Command(update=..., goto=...)</code>，还可以 <code>graph=Command.PARENT</code> 跳到父图，或者作为输入 <code>Command(resume=...)</code> 恢复中断。</p></div></details>
+    <details><summary>checkpointer 存了什么？什么时候存？</summary><div class="ans">
+      <p>每个 super-step 结束时存一个完整状态快照，加上下一步要执行的节点、元数据（source、step）、父 checkpoint，以及失败时已成功节点的 pending writes。按 <code>thread_id</code> 组织。默认 durability 是 <code>"async"</code>：执行下一步的同时异步写入。</p></div></details>
+    <details><summary>短期记忆和长期记忆在 LangGraph 里怎么实现？</summary><div class="ans">
+      <p>短期记忆是 checkpointer：同一个 thread 的状态（主要是消息历史）自动延续，太长时用裁剪、总结中间件控制。长期记忆是 Store：跨 thread，按 namespace（如用户 id）存键值，可以语义检索，由节点或工具主动读写。</p></div></details>
+    <details><summary><code>interrupt()</code> 恢复时发生了什么？有什么坑？</summary><div class="ans">
+      <p>恢复时所在节点从头重新执行，执行到 <code>interrupt()</code> 时直接返回 resume 的值。坑：interrupt 前的副作用会执行两次；多个 interrupt 按顺序匹配 resume 值；不能用宽泛的 try/except 吞掉中断异常；必须配 checkpointer，并用同一个 <code>thread_id</code> 恢复。</p></div></details>
+    <details><summary>时间旅行是什么？会覆盖历史吗？</summary><div class="ans">
+      <p>用历史 checkpoint 的 config 调 <code>invoke(None, config)</code>：该点之前不重跑，之后重新执行；用 <code>update_state</code> 修改后再跑就是分叉。都会产生新的 checkpoint（source 为 <code>fork</code> 或 <code>update</code>），旧的不变，所以 thread 的历史是一棵树。</p></div></details>
+    <details><summary>什么是 durable execution？LangGraph 怎么做到的？</summary><div class="ans">
+      <p>长时间运行的流程在进程崩溃、部署重启后能从断点继续，而不是从头再来。LangGraph 靠每个 super-step 的 checkpoint 和 pending writes：重新用同一个 thread 调用时，已完成的步骤不重跑。节点要尽量幂等，有副作用的操作可以包在 <code>@task</code> 里让结果被存档。1.2 的优雅停机就是在本步结束后停下，留下可恢复的 checkpoint。</p></div></details>
+    <details><summary><code>create_agent</code> 和旧的 <code>AgentExecutor</code>、<code>create_react_agent</code> 有什么区别？</summary><div class="ans">
+      <p><code>AgentExecutor</code> 是 0.x 的黑盒循环，最早靠解析文本里的 ReAct 格式，后来也支持原生工具调用，但循环内部难以定制，已移到 <code>langchain-classic</code>。<code>create_react_agent</code> 是 LangGraph 预置的工具调用 agent，用 <code>pre_model_hook</code> 等参数定制，1.0 起废弃。<code>create_agent</code> 基于原生工具调用，编译成 LangGraph 图，用六个中间件钩子定制，结构化输出放进主循环。</p></div></details>
+    <details><summary>中间件的执行顺序是怎样的？</summary><div class="ans">
+      <p><code>middleware=[A, B, C]</code>：<code>before_agent</code>、<code>before_model</code> 按 A、B、C 的顺序；<code>after_model</code>、<code>after_agent</code> 按 C、B、A；<code>wrap_model_call</code>、<code>wrap_tool_call</code> 是洋葱，A 在最外层，请求经过 A、B、C 到达模型，响应按 C、B、A 返回。<code>before_*</code>、<code>after_*</code> 是图里的节点，可以写 <code>jump_to</code> 改路由；<code>wrap_*</code> 是函数包装，可以改请求、重试、短路。</p></div></details>
+    <details><summary>模型一次返回多个工具调用，<code>create_agent</code> 怎么执行？</summary><div class="ans">
+      <p>每个待执行的调用生成一个 <code>Send("tools", [call])</code>，在同一个 super-step 里并行执行，结果作为 <code>ToolMessage</code> 用 <code>add_messages</code> 合并回状态，下一步回到模型。如果工具之间有顺序依赖，应该让模型分两轮调用，或者把它们合成一个工具。</p></div></details>
+    <details><summary>多智能体用 supervisor 还是 handoff？</summary><div class="ans">
+      <p>主 agent 调子 agent（supervisor / subagents）上下文隔离好、能并行，但子 agent 不直接面对用户；handoff 适合多角色直接和用户对话，串行、历史共享。先问自己是否真的需要多个 agent：很多时候单 agent 加按需加载的 skills 就够了，多 agent 会增加调用次数和调试难度。</p></div></details>
+    <details><summary>LangGraph 在生产中要注意什么？</summary><div class="ans">
+      <p>用 Postgres 等持久 checkpointer 并定期清理；节点幂等，副作用放在 interrupt 之后或单独节点；设置调用次数上限和节点超时；状态里不要放大对象，大文件放外部存储只存引用；用 LangSmith 或 OpenTelemetry 追踪；升级时注意 1.x 小版本里的行为变化，比如 <code>langchain-core</code> 1.7 的工具调用流式格式。</p></div></details>
+    <details><summary>大家对 LangChain 的批评是什么？1.0 怎么回应的？</summary><div class="ans">
+      <p>批评主要是抽象层太多、调试时要穿过很多层封装、版本频繁破坏性变更、文档跟不上。1.0 的回应：核心包大幅收缩，旧东西移到 <code>langchain-classic</code>；agent 只保留一个 <code>create_agent</code>，可以用中间件定制，不再是黑盒；承诺 2.0 之前不做破坏性变更。不过 <code>langchain-core</code> 1.7 改变工具调用的流式迭代行为，说明“1.x 不破坏”在边角上并不绝对。</p></div></details>
+  </div>
+</section>
+
+<section id="tpl" class="stack">
+  <div class="sec-head"><span class="eyebrow">2 分钟口述</span><h2>答题模板</h2></div>
+  <ol class="tpl">
+    <li><b>先讲关系。</b>LangGraph 是底层编排运行时，LangChain 1.x 是上层 agent 框架，<code>create_agent</code> 编译成 LangGraph 图；deepagents 再往上，LangSmith 负责观测和部署。</li>
+    <li><b>讲 LangChain。</b>统一的模型、消息、工具接口；LCEL 用 <code>|</code> 组合 Runnable，适合无环流水线；1.0 用 <code>create_agent</code> 加六个中间件钩子取代 <code>AgentExecutor</code>，before 顺序、after 逆序、wrap 洋葱。</li>
+    <li><b>讲 LangGraph 的图。</b>State 加 reducer，节点返回更新，普通边、条件边、<code>Send</code> 扇出、<code>Command</code> 跳转；并行写同一字段没 reducer 会报错。</li>
+    <li><b>讲运行时。</b>Pregel 式 super-step：并行执行、步末合并、存 checkpoint；recursion limit 数的是 super-step。</li>
+    <li><b>讲持久化带来的能力。</b>thread 记忆、Store 长期记忆、<code>interrupt</code> 人工审批（恢复时节点重跑，副作用要幂等）、时间旅行、durable execution；最后提 2026 年的节点超时、错误处理、优雅停机和 MCP 并入。</li>
+  </ol>
+  <p class="note">常见失分点：说 LangGraph 是 LangChain 的一个模块（它是独立包，反过来 LangChain 依赖它）；说节点直接修改 state（节点返回更新，由 reducer 合并）；说 recursion limit 默认 25（1.0.6 起已改成上万）；说 interrupt 恢复时从中断的那一行继续（实际是整个节点重跑）；说时间旅行会改写历史（会产生新的 checkpoint 分支）；还在推荐 <code>AgentExecutor</code> 或 <code>create_react_agent</code>。</p>
+  <div class="src">资料来源：
+    <ul>
+      <li><a href="https://www.langchain.com/blog/langchain-langgraph-1dot0">LangChain 与 LangGraph 1.0 发布</a>、<a href="https://docs.langchain.com/oss/python/releases/langchain-v1">LangChain v1 新特性</a>、<a href="https://docs.langchain.com/oss/python/releases/changelog">官方 changelog</a>、<a href="https://en.wikipedia.org/wiki/LangChain">Wikipedia：LangChain</a></li>
+      <li><a href="https://docs.langchain.com/oss/python/langgraph/graph-api">Graph API</a>、<a href="https://docs.langchain.com/oss/python/langgraph/persistence">持久化</a>、<a href="https://docs.langchain.com/oss/python/langchain/multi-agent">多智能体模式</a>、<a href="https://docs.langchain.com/langsmith/deployment">LangSmith Deployment</a></li>
+      <li>源码：<a href="https://pypi.org/project/langgraph/">langgraph 1.2.20</a>（<code>pregel/_loop.py</code>、<code>types.py</code>）、<a href="https://pypi.org/project/langchain/">langchain 1.4.9</a>（<code>agents/factory.py</code>、<code>agents/middleware</code>）、<a href="https://pypi.org/project/deepagents/">deepagents 0.7.34</a>（<code>graph.py</code>）；两个实验的结果都用 langgraph 1.2.20 实际跑过</li>
+    </ul>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  function $(id){return document.getElementById(id);}
+  function seg(id,opts,cur,cb){var el=$(id);el.innerHTML="";opts.forEach(function(o){var b=document.createElement("button");b.type="button";b.textContent=o[1];b.setAttribute("aria-pressed",o[0]===cur);b.addEventListener("click",function(){cb(o[0]);});el.appendChild(b);});}
+  function c(s){return "<code>"+s+"</code>";}
+  var NS="http://www.w3.org/2000/svg";
+
+  /* ---------- lab1: super-step ---------- */
+  var R=true, shown=0, steps=[];
+  var NODES={start:[20,62,70,46,"START"],planner:[130,62,120,46,"planner"],search_a:[300,14,130,46,"search_a"],search_b:[300,110,130,46,"search_b"],writer:[480,62,120,46,"writer"],reviewer:[650,62,120,46,"reviewer"],end:[810,62,70,46,"END"]};
+  function sim(){
+    var N=Math.max(0,Math.min(4,parseInt($("aN").value)||0)), L=Math.max(1,parseInt($("aL").value)||1);
+    var st=[], v={}, k=0, rounds=0;
+    function fmt(){var o=[];if(v.question!==undefined)o.push("question");if(v.docs!==undefined)o.push("docs="+JSON.stringify(v.docs));if(v.draft!==undefined)o.push("draft="+v.draft);if(v.rounds!==undefined)o.push("rounds="+v.rounds);return o.length?o.map(c).join(" "):"（空）";}
+    if(R)v.docs=[];
+    st.push({step:-1,ran:[],label:"写入输入",vals:fmt(),next:["__start__"]});
+    var plan=[["start"],["planner"],["search_a","search_b"]];
+    var s=0, cur=["start"];
+    while(true){
+      var ran=cur, next, err=null;
+      if(ran[0]==="start"){v.question="…";v.docs=[];next=["planner"];}
+      else if(ran[0]==="planner"){v.rounds=0;next=["search_a","search_b"];}
+      else if(ran[0]==="search_a"){ if(!R){err="InvalidUpdateError";} else {v.docs=["A","B"];} next=["writer"];}
+      else if(ran[0]==="writer"){k++;v.draft="v"+k;next=["reviewer"];}
+      else if(ran[0]==="reviewer"){v.rounds=v.rounds+1;next=(v.rounds<=N)?["writer"]:[];}
+      if(err){st.push({step:s,ran:ran,err:err});break;}
+      st.push({step:s,ran:ran,vals:fmt(),next:next});
+      if(s>=L){st.push({step:s,ran:[],err:"GraphRecursionError",lim:L});break;}
+      if(!next.length){st.push({step:s,done:true});break;}
+      cur=next; s++;
+    }
+    return st;
+  }
+  function nm(x){return x==="start"?"__start__":x;}
+  function adraw(){
+    var p=$("aPlot"); p.innerHTML="";
+    var last=shown>0?steps[shown-1]:null, act={}, bad={};
+    if(last&&last.ran){last.ran.forEach(function(n){if(last.err==="InvalidUpdateError")bad[n]=1;else if(!last.err)act[n]=1;});}
+    if(last&&last.done)act.end=1;
+    function line(d,cls){var e=document.createElementNS(NS,"path");e.setAttribute("d",d);e.setAttribute("class",cls||"ln arr");p.appendChild(e);}
+    line("M90,85 L126,85");line("M250,80 L296,40");line("M250,90 L296,130");line("M430,40 L476,80");line("M430,130 L476,92");line("M600,85 L646,85");line("M770,85 L806,85");
+    line("M710,62 C700,0 560,0 545,58");
+    Object.keys(NODES).forEach(function(k){var n=NODES[k];var r=document.createElementNS(NS,"rect");r.setAttribute("x",n[0]);r.setAttribute("y",n[1]);r.setAttribute("width",n[2]);r.setAttribute("height",n[3]);r.setAttribute("rx",6);r.setAttribute("class",bad[k]?"b-neg":(act[k]?"b-tok":"b-io"));if(act[k]||bad[k])r.setAttribute("style","stroke-width:2.4");p.appendChild(r);
+      var f=document.createElementNS(NS,"foreignObject");f.setAttribute("x",n[0]);f.setAttribute("y",n[1]);f.setAttribute("width",n[2]);f.setAttribute("height",n[3]);f.innerHTML="<div xmlns=\"http://www.w3.org/1999/xhtml\" class=\"fo\"><span>"+(k==="start"||k==="end"?n[4]:c(n[4]))+"</span></div>";p.appendChild(f);});
+    var t2=document.createElementNS(NS,"text");t2.setAttribute("x",630);t2.setAttribute("y",14);t2.setAttribute("style","font-size:12px;fill:var(--muted)");t2.textContent="要求返工";p.appendChild(t2);
+    var rows=[];
+    for(var i=0;i<shown;i++){var r=steps[i];
+      if(r.err==="InvalidUpdateError")rows.push("<tr><th>"+r.step+"</th><td>"+r.ran.map(function(x){return c(nm(x));}).join("、")+"</td><td colspan=\"2\" style=\"color:var(--neg)\">"+c("InvalidUpdateError")+"：两个节点同一步写 "+c("docs")+"，没有 reducer，本步不存 checkpoint</td></tr>");
+      else if(r.err)rows.push("<tr><th>—</th><td colspan=\"3\" style=\"color:var(--neg)\">"+c("GraphRecursionError")+"：存完 step "+r.step+" 后达到 limit "+r.lim+"</td></tr>");
+      else if(r.done)rows.push("<tr><th>—</th><td colspan=\"3\">next 为空，运行结束</td></tr>");
+      else rows.push("<tr><th>"+r.step+"</th><td>"+(r.ran.length?r.ran.map(function(x){return c(nm(x));}).join("、"):r.label)+"</td><td>"+r.vals+"</td><td>"+(r.next.length?r.next.map(function(x){return c(nm(x));}).join("、"):"（空）")+"</td></tr>");}
+    $("aOut").innerHTML=rows.join("")||"<tr><td colspan=\"4\">点“下一个 super-step”开始</td></tr>";
+    var fin=steps[steps.length-1], total=0; steps.forEach(function(r){if(!r.err&&!r.done&&r.step>=0)total=Math.max(total,r.step+1);});
+    var t;
+    if(shown===0)t="还没开始。共 "+(steps.filter(function(r){return r.vals;}).length)+" 个 checkpoint 会被存下（含输入的 step -1）。";
+    else if(last.err==="InvalidUpdateError")t="并行的两个检索节点都返回了 "+c("docs")+" 的更新。没有 reducer 的通道每步只能接收一个值，运行时不知道该保留哪个，直接报错。给 "+c("docs")+" 加上 "+c("Annotated[list, operator.add]")+" 就能把两个结果拼起来。";
+    else if(last.err)t="recursion limit 数的是 super-step：某一步的 checkpoint 存完后，如果它的 step 编号已经达到 limit 就报错，哪怕已经没有下一步。本图返工 "+$("aN").value+" 次共需要 "+(5+2*parseInt($("aN").value||0))+" 个 super-step（含 "+c("__start__")+"），limit 至少要设这么大。";
+    else if(last.done)t="运行结束，共 "+total+" 个 super-step（含 "+c("__start__")+"），存了 "+(total+1)+" 个 checkpoint。";
+    else if(last.ran&&last.ran.length===2)t=c("search_a")+" 和 "+c("search_b")+" 在同一个 super-step 里并行执行，读的是同一份快照；它们的写入在步末由 reducer 合并成 "+c("docs = [A, B]")+"。";
+    else if(last.ran&&last.ran[0]==="writer"&&last.step>3)t="条件边把流程送回 "+c("writer")+"：图里有环，这正是 LCEL 表达不了的地方。";
+    else t="当前在 step "+last.step+"。每个 super-step 结束都会存一个 checkpoint。";
+    $("aVerdict").innerHTML=t;
+    $("aStep").disabled=shown>=steps.length; $("aRun").disabled=shown>=steps.length;
+  }
+  function areset(){steps=sim();shown=0;adraw();}
+  function aseg(){seg("aR",[[true,"docs 带 reducer"],[false,"docs 不带 reducer"]],R,function(k){R=k;aseg();areset();});}
+  aseg();
+  $("aStep").addEventListener("click",function(){if(shown<steps.length){shown++;adraw();}});
+  $("aRun").addEventListener("click",function(){shown=steps.length;adraw();});
+  $("aReset").addEventListener("click",areset);
+  ["aN","aL"].forEach(function(id){$(id).addEventListener("input",areset);$(id).addEventListener("change",areset);});
+  areset();
+
+  /* ---------- lab2: interrupt ---------- */
+  var pos="before", cps=[], head=-1, pending=false, sent=0, log=[], msg="";
+  function addcp(parent,step,src,vals,next){cps.push({id:cps.length,parent:parent,step:step,src:src,vals:JSON.parse(JSON.stringify(vals)),next:next,intr:0});head=cps.length-1;return head;}
+  function runApprove(){
+    log.push(c("approve")+" 开始执行");
+    if(pos==="before"){sent++;log.push("发送通知（第 "+sent+" 次）");}
+    cps[head].intr=1; pending=true;
+    log.push(c("interrupt()")+" 暂停，调用方拿到 "+c("__interrupt__"));
+  }
+  function brun(){
+    addcp(null,-1,"input",{},"__start__");
+    addcp(0,0,"loop",{amount:300},"draft");
+    log.push(c("draft")+" 执行");
+    addcp(1,1,"loop",{amount:300},"approve");
+    runApprove();
+    msg=pos==="before"?"图停在 approve。通知放在 interrupt 之前，所以已经发了 1 次。现在点“批准”或“拒绝”。":"图停在 approve。通知放在 interrupt 之后，暂停时还没发。";
+  }
+  function bresume(d){
+    var h=cps[head];
+    log.push("用 "+c("Command(resume='"+d+"')")+" 恢复："+c("approve")+" 从头重新执行");
+    if(pos==="before"){sent++;log.push("发送通知（第 "+sent+" 次）");}
+    log.push(c("interrupt()")+" 不再暂停，直接返回 '"+d+"'");
+    if(pos==="after"){sent++;log.push("发送通知（第 "+sent+" 次）");}
+    var v=JSON.parse(JSON.stringify(h.vals)); v.decision=d;
+    addcp(h.id,h.step+1,"loop",v,d==="yes"?"execute":"");
+    if(d==="yes"){log.push(c("execute")+" 执行退款");var v2=JSON.parse(JSON.stringify(v));v2.status="refunded";addcp(head,cps[head].step+1,"loop",v2,"");}
+    pending=false;
+    msg=pos==="before"?"恢复时整个 approve 节点重新执行，interrupt 之前的通知又发了一次，这个 thread 里一共发了 "+sent+" 次通知。这就是 interrupt 之前不能放副作用的原因。":"通知放在 interrupt 之后，暂停时不执行，恢复后只执行一次。目前一共发了 "+sent+" 次。";
+  }
+  function breplay(){
+    var b=cps[2]; addcp(2,b.step+1,"fork",b.vals,"approve");
+    log.push("从 c2 回放："+c("draft")+" 不重跑");
+    runApprove();
+    msg="回放产生了一个 source 为 "+c("fork")+"、parent 为 c2 的新 checkpoint，从 "+c("approve")+" 开始重新执行，又停在 "+c("interrupt()")+"。原来的 checkpoint 一个都没变。";
+  }
+  function bfork(){
+    var b=cps[2], v=JSON.parse(JSON.stringify(b.vals)); v.amount=50;
+    addcp(2,b.step+1,"update",v,"approve");
+    log.push(c("update_state")+"：在 c2 后面写入 amount=50");
+    runApprove();
+    msg=c("update_state")+" 在 c2 后面接了一个 source 为 update 的 checkpoint，然后从这里跑出一条新分支，同样停在 interrupt。批准或拒绝只作用于这条最新的分支。";
+  }
+  function vs(o){var a=[];["amount","decision","status"].forEach(function(k){if(o[k]!==undefined)a.push(k+"="+(typeof o[k]==="string"?"'"+o[k]+"'":o[k]));});return a.length?c(a.join(", ")):"（空）";}
+  function bdraw(){
+    $("bOut").innerHTML=cps.length?cps.map(function(p){return "<tr"+(p.id===head?" style=\"font-weight:700\"":"")+"><th>c"+p.id+(p.id===head?"（最新）":"")+"</th><td>"+(p.parent===null?"—":"c"+p.parent)+"</td><td>"+p.step+"</td><td>"+c(p.src)+"</td><td>"+vs(p.vals)+"</td><td>"+(p.next?c(p.next):"（空）")+"</td><td>"+(p.intr?(p.id===head&&pending?"待恢复":"触发过"):"—")+"</td></tr>";}).join(""):"<tr><td colspan=\"7\">thread 还是空的，点“运行”</td></tr>";
+    $("bLog").innerHTML=log.length?log.map(function(l,i){return "<tr><th>"+(i+1)+"</th><td>"+l+"</td></tr>";}).join(""):"";
+    $("bLogW").style.display=log.length?"":"none"; $("bLogW").scrollTop=1e6;
+    $("bVerdict").innerHTML=msg||"通知的位置可以切换：放在 interrupt 之前，或者之后。";
+    $("bRun").disabled=cps.length>0; $("bYes").disabled=!pending; $("bNo").disabled=!pending;
+    $("bReplay").disabled=cps.length<3; $("bFork").disabled=cps.length<3;
+  }
+  function breset(){cps=[];head=-1;pending=false;sent=0;log=[];msg="";bdraw();}
+  function bseg(){seg("bPos",[["before","通知在 interrupt 之前"],["after","通知在 interrupt 之后"]],pos,function(k){pos=k;bseg();breset();});}
+  bseg();
+  $("bRun").addEventListener("click",function(){brun();bdraw();});
+  $("bYes").addEventListener("click",function(){bresume("yes");bdraw();});
+  $("bNo").addEventListener("click",function(){bresume("no");bdraw();});
+  $("bReplay").addEventListener("click",function(){breplay();bdraw();});
+  $("bFork").addEventListener("click",function(){bfork();bdraw();});
+  $("bReset").addEventListener("click",breset);
+  breset();
+
+  var ds=document.querySelectorAll("#qa details");
+  $("openAll").addEventListener("click",function(){ds.forEach(function(d){d.open=true;});});
+  $("closeAll").addEventListener("click",function(){ds.forEach(function(d){d.open=false;});});
+})();
+</script>
+</body>
+</html>
