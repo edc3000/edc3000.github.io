@@ -11,6 +11,7 @@ export const INTERVIEW_CATEGORIES = [
   { key: 'algorithms', label: '算法', blurb: 'SFT 与 LoRA、DPO/PPO/GRPO、蒸馏、scaling 与超参' },
   { key: 'infra', label: 'Infra', blurb: 'KV Cache、FlashAttention、数值精度、训练框架、推理延迟' },
   { key: 'agent', label: 'Agent', blurb: 'RAG、Agent 架构、工具调用' },
+  { key: 'evaluation', label: '模型评测', blurb: 'Benchmark、评测指标、LLM 裁判、Arena 排名、统计显著性与数据污染' },
   { key: 'scenarios', label: '场景题', blurb: '业务场景设计与项目追问' },
 ] as const;
 

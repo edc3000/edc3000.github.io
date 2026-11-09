@@ -18,7 +18,7 @@ describe('categoryOf', () => {
 });
 
 describe('buildTree', () => {
-  it('六个分类全部列出,空分类 count 为 0', () => {
+  it('七个分类全部列出,空分类 count 为 0', () => {
     const tree = buildTree([]);
     expect(tree.map((c) => c.key)).toEqual(INTERVIEW_CATEGORIES.map((c) => c.key));
     expect(tree.every((c) => c.count === 0)).toBe(true);
