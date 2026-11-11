@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- 搜索结果跳到知识库里带侧栏的条目页,而不是这份裸 HTML -->
+<meta data-pagefind-meta="url[content]" content="/interview/agent/langfuse/">
+<meta name="description" content="Langfuse 八股:定位与时间线,trace、observation、session、score 数据模型与 10 种观测类型,v4 observation 优先的不可变宽表,基于 OpenTelemetry 的 SDK、propagate_attributes、批量上报与 flush,trace id 确定性采样,Web/Worker 加 Postgres、ClickHouse、Redis、S3 的架构与摄取链路,prompt 的 version、label 与 stale-while-revalidate 缓存,成本计算,LLM 裁判、代码评测器、数据集实验与 CI,2026 年 ClickHouse 收购、v4、SDK v5、AI Gateway 等新变化。配采样、prompt 缓存两个对照真库验证的交互实验与高频追问。">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>Langfuse：LLM 应用的观测、Prompt 管理与评测</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@600;900&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous">
+<style>
+/* Layout: 与其他八股页同一套规格书式单栏长文 */
+:root{
+  --bg:#EFF2F4; --surface:#FFFFFF; --surface-2:#F7F9FA;
+  --ink:#16212B; --muted:#5B6873; --line:#D3DAE0; --line-strong:#9AA6B0;
+  --seq:#2F5FD0; --seq-bg:#E3EBFB;
+  --tok:#0C8578; --tok-bg:#DBF1ED;
+  --pos:#2E7D32; --pos-bg:#E3F2E4;
+  --neg:#C2412D; --neg-bg:#FBE7E3;
+  --warn:#B0731A; --warn-bg:#F7EBD6;
+  --norm-bg:#EAEEF1;
+  --display:"Noto Serif SC","Songti SC",serif;
+  --sans:-apple-system,"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --seq:#86A7F4; --seq-bg:#1C2A47;
+  --tok:#4CC6B6; --tok-bg:#11332F;
+  --pos:#6FCF7A; --pos-bg:#16301A;
+  --neg:#FF8A73; --neg-bg:#3B1E18;
+  --warn:#E2A851; --warn-bg:#382A13;
+  --norm-bg:#212C37;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0F151B; --surface:#172029; --surface-2:#1B2530;
+  --ink:#E2E8ED; --muted:#94A2AE; --line:#2B3742; --line-strong:#536271;
+  --seq:#86A7F4; --seq-bg:#1C2A47;
+  --tok:#4CC6B6; --tok-bg:#11332F;
+  --pos:#6FCF7A; --pos-bg:#16301A;
+  --neg:#FF8A73; --neg-bg:#3B1E18;
+  --warn:#E2A851; --warn-bg:#382A13;
+  --norm-bg:#212C37;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.75}
+.wrap{max-width:1040px;margin:0 auto;padding-block:40px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:56px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.3}
+h1{font-size:clamp(28px,5vw,44px);font-weight:900;letter-spacing:.01em}
+h2{font-size:clamp(22px,3.2vw,28px);font-weight:900}
+h3{font-size:19px;font-weight:600}
+p{margin:0;max-width:68ch}
+code,.mono{font-family:var(--mono);font-size:.9em}
+a{color:var(--seq)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--seq);outline-offset:3px;border-radius:4px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.stack{display:flex;flex-direction:column;gap:16px}
+.sec-head{display:flex;flex-direction:column;gap:6px;border-top:2px solid var(--ink);padding-top:14px}
+
+header{display:flex;flex-direction:column;gap:18px}
+.lede{font-size:17px;color:var(--muted);max-width:60ch}
+.toc{display:flex;flex-wrap:wrap;gap:8px}
+.toc a{font-size:13.5px;text-decoration:none;color:var(--ink);border:1px solid var(--line);background:var(--surface);padding:4px 12px;border-radius:999px}
+.toc a:hover{border-color:var(--ink)}
+
+.recite{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--ink);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.recite p{max-width:none}
+.recite .tag{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.08em}
+mark{background:var(--warn-bg);color:inherit;padding:0 3px;border-radius:3px}
+
+figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.scroll{overflow-x:auto}
+.dg{display:block;width:100%;min-width:760px;height:auto}
+figcaption{font-size:13.5px;color:var(--muted)}
+.dg text{fill:var(--ink);font-family:var(--sans);font-size:12.5px}
+.dg .c{text-anchor:middle;dominant-baseline:central}
+.dg .s{font-size:11.5px;fill:var(--muted)}
+.dg .h{font-weight:700;font-size:13.5px}
+.dg .m{font-family:var(--mono);font-size:11.5px}
+.dg rect{stroke-width:1.2}
+.b-io{fill:var(--surface);stroke:var(--ink)}
+.b-seq{fill:var(--seq-bg);stroke:var(--seq)}
+.b-tok{fill:var(--tok-bg);stroke:var(--tok)}
+.b-pos{fill:var(--pos-bg);stroke:var(--pos)}
+.b-neg{fill:var(--neg-bg);stroke:var(--neg)}
+.b-ref{fill:var(--warn-bg);stroke:var(--warn)}
+.panel{fill:var(--surface-2);stroke:var(--line)}
+.ln{stroke:var(--muted);stroke-width:1.3;fill:none}
+.arr{marker-end:url(#ah)}
+.ahp{fill:var(--muted)}
+.dg .pos{fill:var(--pos)}
+.dg .neg{fill:var(--neg)}
+.dg .zero{fill:var(--warn-bg);stroke:none}
+.dg .gd{stroke:var(--line-strong);stroke-width:1;stroke-dasharray:3 3}
+.dg .ax{stroke:var(--ink);stroke-width:1.2}
+.dg .ghost{fill:none;stroke:var(--line-strong);stroke-width:1.2;stroke-dasharray:4 3}
+.dg .mk-old{stroke:var(--warn);stroke-width:3}
+.dg .mk-new{stroke:var(--pos);stroke-width:3}
+.mul{color:#D9822B;font-weight:700}
+.dg .cl-raw{stroke:var(--muted);stroke-width:1.4;stroke-dasharray:6 4;fill:none}
+.dg .cl-clip{stroke:var(--seq);stroke-width:2.6;fill:none}
+.dg .dot{fill:var(--neg)}
+
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.pt{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pt h3{font-family:var(--sans);font-size:15.5px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0}
+.pt p,.pt li{font-size:14.5px;line-height:1.7}
+.pt ul{margin:0;padding-left:1.2em}
+.chip{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;border:1px solid;letter-spacing:.03em}
+.chip.seq{color:var(--seq);border-color:var(--seq);background:var(--seq-bg)}
+.chip.tok{color:var(--tok);border-color:var(--tok);background:var(--tok-bg)}
+.chip.warn{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.note{font-size:14px;color:var(--muted);border:1px dashed var(--line-strong);border-radius:8px;padding:12px 14px}
+/* KaTeX 的 MathML 是绝对定位的，容器要定位才能把它裁在里面，否则手机上会横向溢出 */
+.scroll,.tbl,.tex-d,.fo,.katex{position:relative}
+.fo{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-family:var(--sans);font-size:12.5px;line-height:1.25;color:var(--ink)}
+.fo .katex{font-size:1.02em}
+.fo .fs,.fo.fs{font-size:11.5px;color:var(--muted)}
+.fo.fs .katex{color:var(--ink)}
+.tex-d{overflow-x:auto;overflow-y:hidden}
+.tex-d .katex-display{margin:.3em 0}
+.katex{font-size:1.08em}
+.terms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.term{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.term .k{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.term p{font-size:14.5px}
+pre{margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.6;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto}
+pre .cm{color:var(--muted)}
+
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:680px;font-size:13.5px;line-height:1.55}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+thead th{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--muted);background:var(--surface-2)}
+tbody th{font-weight:700;white-space:nowrap}
+tr:last-child th,tr:last-child td{border-bottom:0}
+td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+td.cut{background:var(--warn-bg)}
+.posv{color:var(--pos);font-weight:600}
+.negv{color:var(--neg);font-weight:600}
+.flow{color:var(--pos)} .stop{color:var(--warn);font-weight:600}
+
+/* lab */
+.lab{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:16px}
+.lab h3{font-family:var(--sans);font-size:15.5px;font-weight:700}
+.row{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:flex-end}
+.fld{display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.fld input[type=number]{font:inherit;font-family:var(--mono);font-size:13px;width:84px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+input:focus-visible{outline:2px solid var(--seq);outline-offset:1px}
+.chk{display:flex;gap:6px;align-items:center;font-size:13.5px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button[aria-pressed=true]{border-color:var(--ink);background:var(--surface-2);font-weight:700}
+.toks{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.tk{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface-2);min-width:0}
+.tk .w{font-weight:700;font-size:14px}
+.tk .v{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tk input[type=range]{width:100%}
+.tk label.v{display:flex;flex-direction:column;gap:2px}
+.fld input.txt{font:inherit;font-family:var(--mono);font-size:13px;width:230px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+.fld select{font:inherit;font-family:var(--mono);font-size:13px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--ink)}
+.mbar{display:flex;height:26px;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;background:var(--surface-2)}
+.mbar span{display:block;height:100%}
+.mw{background:var(--seq)} .mk{background:var(--tok)} .mf{background:var(--surface-2)} .mo{background:var(--neg)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;border:1px solid var(--line-strong)}
+.verdict{font-size:14px;border-left:3px solid var(--warn);padding:6px 12px;background:var(--warn-bg);border-radius:0 6px 6px 0}
+
+.qa{display:flex;flex-direction:column;gap:10px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 18px}
+summary{cursor:pointer;padding:14px 0;font-weight:700;font-size:15px;list-style:none;display:flex;gap:10px}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"+";font-family:var(--mono);color:var(--muted);width:14px;flex:none}
+details[open] summary::before{content:"−"}
+details .ans{padding:0 0 16px 24px;display:flex;flex-direction:column;gap:8px;font-size:14.5px}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;font-size:13px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);padding:5px 12px;border-radius:6px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button:focus-visible{outline:2px solid var(--seq);outline-offset:2px}
+
+ol.tpl{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:8px;max-width:72ch}
+ol.tpl b{font-weight:700}
+.src{font-size:13px;color:var(--muted)}
+.src ul{margin:6px 0 0;padding-left:1.2em}
+
+@media (max-width:760px){
+  .grid2,.terms{grid-template-columns:1fr}
+  .toks{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+.katex-display{overflow-x:auto;overflow-y:hidden}
+button:disabled{opacity:.45;cursor:default}
+p code,li code,td code,.ans code,summary code,figcaption code{overflow-wrap:anywhere}
+#sOut td,#cOut td{white-space:normal}
+.lab .seg{margin-bottom:-4px}
+</style>
+</head>
+<body data-pagefind-body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">大模型面试八股 · Agent 篇</div>
+  <h1>Langfuse：LLM 应用的观测、Prompt 与评测</h1>
+  <p class="lede">agent 上线后最常见的问题是“它为什么这么回答”“这一单花了多少钱”“改了 prompt 之后变好还是变坏”。Langfuse 是回答这些问题的开源平台：用 trace 记录每次请求里的模型调用、工具调用和检索，用 prompt 管理做版本和发布，用 score、LLM 裁判和数据集实验做评测。本文讲它的数据模型、基于 OpenTelemetry 的 SDK、服务端架构和 2026 年的 v4 改版，两个实验分别对着真实的 langfuse 5.2.0 Python SDK 跑过，采样判定和缓存行为都和真库一致。</p>
+  <nav class="toc" aria-label="目录">
+    <a href="#recite">背诵版</a><a href="#what">是什么</a><a href="#hist">时间线</a><a href="#model">数据模型</a><a href="#sdk">SDK 埋点</a><a href="#sample">采样与 trace id</a><a href="#lab1">采样实验</a><a href="#arch">服务端架构</a><a href="#prompt">Prompt 管理</a><a href="#lab2">缓存实验</a><a href="#cost">成本计算</a><a href="#eval">评测</a><a href="#new">2026 新变化</a><a href="#cmp">怎么选</a><a href="#qa">高频追问</a><a href="#tpl">答题模板</a>
+  </nav>
+</header>
+
+<section id="recite" class="stack">
+  <div class="sec-head"><span class="eyebrow">先给结论</span><h2>30 秒背诵版</h2></div>
+  <div class="recite">
+    <p><b>Langfuse</b> 是柏林团队 2023 年开源的 LLM 工程平台（YC W23），核心是三件事：<b>观测</b>（tracing、成本、延迟、会话）、<b>Prompt 管理</b>（版本、label、客户端缓存）、<b>评测</b>（score、LLM 裁判、人工标注、数据集实验）。代码 MIT 协议，可以自部署，2025 年 6 月把 LLM 裁判、标注队列、playground 也全部开源，只有 SCIM、审计日志这类企业功能收费。2026 年 1 月被 ClickHouse 收购，开源协议不变。</p>
+    <p><b>数据模型</b>：一次请求是一个 <b>trace</b>，里面嵌套多个 <b>observation</b>（<code>span</code>、<code>generation</code>、<code>event</code>，以及 <code>agent</code>、<code>tool</code>、<code>retriever</code> 等共 10 种）；多轮对话用 <code>session_id</code> 串成 <b>session</b>；评测结果是挂在 trace、observation 或 session 上的 <b>score</b>。2026 年的 v4 改成“observation 优先”：<code>user_id</code>、<code>session_id</code> 这类 trace 属性直接写进每个 observation，服务端只存一张不可变的宽表，大项目的看板快了 10 倍以上。</p>
+    <p><b>SDK</b> 从 2025 年起建立在 OpenTelemetry 上：<code>@observe</code> 装饰器或上下文管理器生成 span，<code>propagate_attributes</code> 给整棵子树带上用户和会话，后台批量异步上报，不阻塞业务；短命进程退出前要 <code>flush()</code>。采样是按 trace id 的确定性采样，同一个 trace 在所有服务里结论一致。<b>服务端</b>是 Web、Worker 两个容器加 Postgres、ClickHouse、Redis、S3：先把原始事件写进 S3，队列里只放引用，Worker 再写进 ClickHouse。截至 2026 年 11 月，最新是 Python SDK 5.2.0，Langfuse Cloud 11 月 16 日起只跑 v4。</p>
+  </div>
+</section>
+
+<section id="what" class="stack">
+  <div class="sec-head"><span class="eyebrow">定位</span><h2>Langfuse 解决什么问题</h2></div>
+  <p>传统 APM（Datadog、Jaeger）擅长记录“哪个接口慢”，但 LLM 应用要看的东西不一样：每次模型调用的完整输入输出、用的哪个 prompt 版本、多少 token、多少钱、模型调了哪些工具、回答质量好不好。这些需要专门的数据模型和界面，这就是 LLM observability 平台的位置。Langfuse 把观测、prompt 和评测放在一个平台里，因为三者是一个闭环：线上 trace 暴露问题，改 prompt，用数据集验证，再发布，再观察。</p>
+  <div class="tbl"><table style="min-width:720px">
+    <thead><tr><th>模块</th><th>做什么</th><th>面试里怎么说</th></tr></thead>
+    <tbody>
+      <tr><th>Tracing</th><td>记录 trace、observation 树、输入输出、延迟、token、成本，按 session、user、tag、环境筛选</td><td>“能看到 agent 每一步干了什么”，排查问题和算账都靠它</td></tr>
+      <tr><th>Prompt 管理</th><td>prompt 存在平台上，有版本号和 label，SDK 按 label 拉取并缓存</td><td>改 prompt 不用重新部署代码，出问题把 label 指回旧版本就是回滚</td></tr>
+      <tr><th>评测</th><td>score（数值、类别、布尔、文本），LLM 裁判、代码评测器、人工标注队列、用户反馈，数据集和实验</td><td>线上评测看趋势，离线实验防回归，CI 里可以卡发布</td></tr>
+      <tr><th>Playground</th><td>在界面里改 prompt、换模型直接试</td><td>从一条坏 trace 一键打开 playground 复现</td></tr>
+      <tr><th>看板与 API</th><td>成本、延迟、质量的看板；Metrics API、Observations API；导出到 S3、GCS</td><td>数据能拿出来接自己的 BI</td></tr>
+      <tr><th>AI Gateway（2026.11 公测）</th><td>代理 OpenAI、Anthropic 请求，统一管理密钥，自动记录成 generation</td><td>不改代码也能拿到全量调用记录和成本</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="hist" class="stack">
+  <div class="sec-head"><span class="eyebrow">时间线</span><h2>从“LLM 产品分析”到 v4</h2></div>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th>时间</th><th>事件</th></tr></thead>
+    <tbody>
+      <tr><th>2022.11</th><td>Marc Klingen、Max Deichmann、Clemens Rawert 入选 YC W23</td></tr>
+      <tr><th>2023.07–08</th><td>开源并发布，最初的定位是“LLM 应用的产品分析”；9 月 400 万美元种子轮（Lightspeed 领投）</td></tr>
+      <tr><th>2024.01</th><td>上线 Prompt 管理</td></tr>
+      <tr><th>2024.04</th><td>Langfuse 2.0，改称 AI 工程平台：Playground、数据集、LLM 裁判评测；后端是 Postgres</td></tr>
+      <tr><th>2024.12</th><td>Langfuse v3：观测数据从 Postgres 迁到 ClickHouse，摄取改成经 S3 和队列的异步流程，是项目史上最大的一次架构调整</td></tr>
+      <tr><th>2025.06</th><td>全部产品功能（LLM 裁判、标注队列、prompt 实验、playground）改为 MIT 开源；Python SDK v3 基于 OpenTelemetry 重写</td></tr>
+      <tr><th>2025.08</th><td>JS/TS SDK v4 也改成基于 OpenTelemetry；同年新增 <code>agent</code>、<code>tool</code> 等观测类型</td></tr>
+      <tr><th>2026.01.16</th><td>ClickHouse 宣布收购 Langfuse（同日 ClickHouse 宣布 4 亿美元 D 轮），Langfuse 继续 MIT 开源、Cloud 照常运营</td></tr>
+      <tr><th>2026.03</th><td>v4 预览：observation 优先的数据模型；Python SDK 4.0.0（3 月 10 日）</td></tr>
+      <tr><th>2026.08.17</th><td>Langfuse v4 正式发布：Monitors、代码评测器、全文搜索、Observations API v2、Metrics API v2</td></tr>
+      <tr><th>2026.10</th><td>Python SDK v5、JS/TS SDK v6（10 月 14 日），主要是删掉已废弃的 API；Skill 管理</td></tr>
+      <tr><th>2026.11</th><td>AI Gateway 公测（11 月 4 日）；Langfuse Cloud 11 月 16 日起只支持 v4，自部署的 v3 安全补丁维护到 2027 年 1 月</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="model" class="stack">
+  <div class="sec-head"><span class="eyebrow">核心概念</span><h2>数据模型：trace、observation、session、score</h2></div>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 330" role="img" aria-label="左边一个 session 包含三轮对话，每轮一个 trace；右边展开第二轮 trace：根 observation 是 agent，下面有 guardrail、两个 generation、并行的 tool 和 retriever，retriever 下面还有 embedding；右侧是时间瀑布图，下方挂着两个 score">
+<rect class="panel" x="10" y="10" width="250" height="310" rx="8"/>
+<foreignObject x="10" y="14" width="250" height="44"><div class="fo"><span style="font-weight:700">Session <code>chat-42</code></span><span class="fs">同一个 <code>session_id</code> 的 trace</span></div></foreignObject>
+<rect class="b-io" x="30" y="66" width="210" height="44" rx="6"/><foreignObject x="30" y="66" width="210" height="44"><div class="fo"><span>Trace：第 1 轮</span><span class="fs">“我的订单到哪了”</span></div></foreignObject>
+<rect class="b-seq" x="30" y="122" width="210" height="44" rx="6"/><foreignObject x="30" y="122" width="210" height="44"><div class="fo"><span>Trace：第 2 轮（右侧展开）</span><span class="fs">“能退货吗”</span></div></foreignObject>
+<rect class="b-io" x="30" y="178" width="210" height="44" rx="6"/><foreignObject x="30" y="178" width="210" height="44"><div class="fo"><span>Trace：第 3 轮</span><span class="fs">“好的谢谢”</span></div></foreignObject>
+<foreignObject x="20" y="232" width="230" height="84"><div class="fo fs" style="align-items:flex-start;text-align:left"><span>每个 observation 都带着<br><code>user_id</code>、<code>session_id</code>、<code>tags</code>、<code>environment</code><br>（v4 起由 SDK 写进每一行）</span></div></foreignObject>
+<path class="ln arr" d="M240,144 L282,144"/>
+<line class="gd" x1="590" y1="30" x2="590" y2="262"/><line class="gd" x1="940" y1="30" x2="940" y2="262"/>
+<foreignObject x="560" y="12" width="60" height="18"><div class="fo fs"><span>0 s</span></div></foreignObject>
+<foreignObject x="910" y="12" width="60" height="18"><div class="fo fs"><span>3 s</span></div></foreignObject>
+<foreignObject x="290" y="34" width="290" height="28"><div class="fo" style="align-items:flex-start"><span><span class="chip warn">agent</span> <code>support-agent</code>（根）</span></div></foreignObject>
+<rect class="b-ref" x="590" y="38" width="338" height="20" rx="3"/>
+<foreignObject x="310" y="66" width="270" height="28"><div class="fo" style="align-items:flex-start"><span><span class="chip warn">guardrail</span> <code>input-check</code></span></div></foreignObject>
+<rect class="b-neg" x="590" y="70" width="14" height="20" rx="3"/>
+<foreignObject x="310" y="98" width="270" height="28"><div class="fo" style="align-items:flex-start"><span><span class="chip tok">generation</span> <code>plan</code> · 1.2k tok · $0.004</span></div></foreignObject>
+<rect class="b-tok" x="605" y="102" width="90" height="20" rx="3"/>
+<foreignObject x="310" y="130" width="270" height="28"><div class="fo" style="align-items:flex-start"><span><span class="chip seq">tool</span> <code>get_order</code></span></div></foreignObject>
+<rect class="b-seq" x="697" y="134" width="44" height="20" rx="3"/>
+<foreignObject x="310" y="162" width="270" height="28"><div class="fo" style="align-items:flex-start"><span><span class="chip seq">retriever</span> <code>kb_search</code></span></div></foreignObject>
+<rect class="b-seq" x="697" y="166" width="68" height="20" rx="3"/>
+<foreignObject x="330" y="194" width="250" height="28"><div class="fo" style="align-items:flex-start"><span><span class="chip tok">embedding</span> <code>embed_query</code></span></div></foreignObject>
+<rect class="b-tok" x="698" y="198" width="14" height="20" rx="3"/>
+<foreignObject x="310" y="226" width="270" height="28"><div class="fo" style="align-items:flex-start"><span><span class="chip tok">generation</span> <code>answer</code> · 3.4k tok · $0.011</span></div></foreignObject>
+<rect class="b-tok" x="767" y="230" width="159" height="20" rx="3"/>
+<rect class="b-pos" x="300" y="276" width="300" height="44" rx="6"/><foreignObject x="300" y="276" width="300" height="44"><div class="fo"><span>Score <code>helpfulness = 0.9</code></span><span class="fs">LLM 裁判打在 <code>answer</code> 这个 observation 上</span></div></foreignObject>
+<rect class="b-pos" x="620" y="276" width="320" height="44" rx="6"/><foreignObject x="620" y="276" width="320" height="44"><div class="fo"><span>Score <code>user_feedback = 0</code></span><span class="fs">用户点了踩，用 SDK 或 API 打在 trace 上</span></div></foreignObject>
+</svg>
+    </div>
+    <figcaption>左边是一个多轮会话，右边是其中一轮 trace 的瀑布图：根是 <code>agent</code>，<code>get_order</code> 和 <code>kb_search</code> 并行执行（起点相同），成本只记在 <code>generation</code> 和 <code>embedding</code> 上，再向上汇总。评测结果是独立的 score，可以挂在任意一层。</figcaption>
+  </figure>
+  <h3>具体例子：用户 u-1024 的两次客服对话</h3>
+  <p>场景是一个电商客服 agent。用户 <code>u-1024</code> 周一打开聊天窗口 <code>chat-42</code>，连发三条消息；周三又新开一个窗口 <code>chat-57</code> 问发票。后端每收到一条消息就处理一次请求、跑一遍 agent。埋点代码只有一处：</p>
+<pre><code>@observe(as_type="agent", name="support-agent")      <span class="cm"># 每次调用 = 一个新的根 observation = 一个新 trace</span>
+def on_message(user_id: str, chat_id: str, text: str) -&gt; str:
+    with propagate_attributes(user_id=user_id, session_id=chat_id):   <span class="cm"># 聊天窗口 id 当 session_id</span>
+        history = load_history(chat_id)        <span class="cm"># 对话历史由应用自己存，不是 Langfuse 存</span>
+        reply = run_agent(history + [text])    <span class="cm"># 内部的模型、工具调用成为子 observation</span>
+        save_history(chat_id, text, reply)
+        return reply
+
+on_message("u-1024", "chat-42", "我的订单到哪了")   <span class="cm"># 周一 10:02</span>
+on_message("u-1024", "chat-42", "能退货吗")         <span class="cm"># 周一 10:03</span>
+on_message("u-1024", "chat-42", "好的谢谢")         <span class="cm"># 周一 10:04</span>
+on_message("u-1024", "chat-57", "能开发票吗")       <span class="cm"># 周三 15:20</span></code></pre>
+  <p>四次调用产生四个 trace，各有各的 trace id；它们里面的每个 observation（包括根 <code>support-agent</code>）都带着 <code>user.id = u-1024</code>，前三个 trace 带 <code>session.id = chat-42</code>，第四个带 <code>chat-57</code>。下面的 trace id 前缀就是用 langfuse 5.2.0 跑这段代码、用内存导出器截下来的。</p>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 300" role="img" aria-label="层级示意：用户 u-1024 有两个 session；chat-42 包含三个 trace，分别对应三条消息；chat-57 包含一个 trace">
+<foreignObject x="10" y="2" width="150" height="20"><div class="fo fs"><span>User（<code>user_id</code>）</span></div></foreignObject>
+<foreignObject x="220" y="2" width="200" height="20"><div class="fo fs"><span>Session（<code>session_id</code>）</span></div></foreignObject>
+<foreignObject x="490" y="2" width="330" height="20"><div class="fo fs"><span>Trace（每条消息一个）</span></div></foreignObject>
+<rect class="b-io" x="10" y="152" width="150" height="70" rx="6"/><foreignObject x="10" y="152" width="150" height="70"><div class="fo"><span><code>u-1024</code></span><span class="fs">2 个 session · 4 个 trace<br>合计 $0.036</span></div></foreignObject>
+<rect class="b-seq" x="220" y="65" width="200" height="90" rx="6"/><foreignObject x="220" y="65" width="200" height="90"><div class="fo"><span><code>chat-42</code></span><span class="fs">周一 10:02–10:04 · 3 个 trace<br>合计 $0.026<br>session score：<code>resolved = true</code></span></div></foreignObject>
+<rect class="b-seq" x="220" y="234" width="200" height="60" rx="6"/><foreignObject x="220" y="234" width="200" height="60"><div class="fo"><span><code>chat-57</code></span><span class="fs">周三 15:20 · 1 个 trace · $0.010</span></div></foreignObject>
+<rect class="b-io" x="490" y="34" width="330" height="44" rx="6"/><foreignObject x="490" y="34" width="330" height="44"><div class="fo"><span><code>95226b18…</code>「我的订单到哪了」</span><span class="fs">plan → get_order → answer · $0.009</span></div></foreignObject>
+<rect class="b-tok" x="490" y="88" width="330" height="44" rx="6"/><foreignObject x="490" y="88" width="330" height="44"><div class="fo"><span><code>44b13c0d…</code>「能退货吗」</span><span class="fs">上图展开的那一轮 · 7 个 observation · $0.015</span></div></foreignObject>
+<rect class="b-io" x="490" y="142" width="330" height="44" rx="6"/><foreignObject x="490" y="142" width="330" height="44"><div class="fo"><span><code>88e7a4fa…</code>「好的谢谢」</span><span class="fs">只有 answer，没调工具 · $0.002</span></div></foreignObject>
+<rect class="b-io" x="490" y="242" width="330" height="44" rx="6"/><foreignObject x="490" y="242" width="330" height="44"><div class="fo"><span><code>a6733798…</code>「能开发票吗」</span><span class="fs">plan → get_invoice → answer · $0.010</span></div></foreignObject>
+<path class="ln arr" d="M160,187 L190,187 L190,110 L218,110"/>
+<path class="ln arr" d="M190,187 L190,264 L218,264"/>
+<path class="ln arr" d="M420,110 L455,110 L455,56 L488,56"/>
+<path class="ln arr" d="M455,110 L488,110"/>
+<path class="ln arr" d="M455,110 L455,164 L488,164"/>
+<path class="ln arr" d="M420,264 L488,264"/>
+<foreignObject x="830" y="88" width="125" height="44"><div class="fo fs" style="align-items:flex-start;text-align:left"><span>trace score：<br><code>user_feedback = 0</code></span></div></foreignObject>
+</svg>
+    </div>
+    <figcaption>这里的“包含”是逻辑上的分组：user 和 session 都不是要事先创建的对象，没有“开始会话”的 API，只是每个 observation 上的 <code>user.id</code>、<code>session.id</code> 字符串属性，Langfuse 按相同的值把 trace 归到一起。所以周三那次对话只要换一个 <code>session_id</code>，就自动成了一个新 session。</figcaption>
+  </figure>
+  <div class="tbl"><table style="min-width:760px">
+    <thead><tr><th>时间</th><th><code>session_id</code></th><th><code>trace_id</code></th><th>用户消息</th><th>这个 trace 里的 observation</th><th class="num">成本</th><th>score</th></tr></thead>
+    <tbody>
+      <tr><th>周一 10:02</th><td><code>chat-42</code></td><td style="white-space:nowrap"><code>95226b18…</code></td><td>我的订单到哪了</td><td><code>support-agent</code> → <code>plan</code>、<code>get_order</code>、<code>answer</code></td><td class="num">$0.009</td><td>—</td></tr>
+      <tr><th>周一 10:03</th><td><code>chat-42</code></td><td style="white-space:nowrap"><code>44b13c0d…</code></td><td>能退货吗</td><td>再加 <code>input-check</code>、<code>kb_search</code>、<code>embed_query</code>，共 7 个</td><td class="num">$0.015</td><td><code>answer</code> 上 <code>helpfulness = 0.9</code>；trace 上 <code>user_feedback = 0</code></td></tr>
+      <tr><th>周一 10:04</th><td><code>chat-42</code></td><td style="white-space:nowrap"><code>88e7a4fa…</code></td><td>好的谢谢</td><td><code>support-agent</code> → <code>answer</code></td><td class="num">$0.002</td><td>—</td></tr>
+      <tr><th>周三 15:20</th><td><code>chat-57</code></td><td style="white-space:nowrap"><code>a6733798…</code></td><td>能开发票吗</td><td><code>support-agent</code> → <code>plan</code>、<code>get_invoice</code>、<code>answer</code></td><td class="num">$0.010</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <p>在界面上对应三种看法：打开 trace <code>44b13c0d…</code> 看的是“这一轮 agent 做了什么、哪步慢、花了多少”；打开 session <code>chat-42</code> 看的是三轮连起来的对话，以及这次对话一共花了 $0.026、用户在第 2 轮点了踩、最后人工标注为已解决；按 user <code>u-1024</code> 筛选看的是这个用户所有对话的用量和反馈。score 也可以分别挂在这三层：<code>helpfulness</code> 评一次回答，<code>user_feedback</code> 评一轮，<code>resolved</code> 评整段对话。</p>
+  <div class="grid2">
+    <div class="pt"><h3>边界怎么划 <span class="chip tok">推荐</span></h3><p>一条用户消息（一次请求、一次 agent 运行）是一个 trace，一个聊天窗口是一个 session。用 LangGraph 时，直接把 <code>thread_id</code> 当 <code>session_id</code>。一轮里异步触发的后台任务（比如对话结束后生成摘要）可以是单独的 trace，带上同一个 <code>session_id</code> 也会出现在这个会话里。</p></div>
+    <div class="pt"><h3>对话历史不在 Langfuse 里 <span class="chip seq">注意</span></h3><p>第 3 轮 <code>answer</code> 的输入里有前两轮的消息，是应用自己（数据库或 LangGraph checkpointer）读出来拼进去的，Langfuse 只是如实记录。所以越往后的轮次 input token 越多、成本越高，在 session 视图里能直接看出来，这也是需要裁剪或总结历史的信号。</p></div>
+    <div class="pt"><h3>反例一：整段对话一个 trace <span class="chip warn">别这样</span></h3><p>根 observation 要等对话结束才结束、才上报，界面上长时间看不到完整的树；每轮的延迟和成本混在一起，用户反馈和 LLM 裁判也对不准是哪一轮。</p></div>
+    <div class="pt"><h3>反例二：每条消息一个新 session <span class="chip warn">别这样</span></h3><p>比如把请求 id 当 <code>session_id</code>。每个 session 只有一轮，会话视图看不到上下文，也没法统计“几轮解决问题”“哪一轮开始用户不满意”这类对话级指标。</p></div>
+  </div>
+  <div class="terms">
+    <div class="term"><span class="k">Trace</span><p>一次请求或一次 agent 运行。v4 之后它更像一个分组键：所有 <code>trace_id</code> 相同的 observation 属于同一个 trace。ID 沿用 W3C Trace Context：trace id 是 32 位十六进制，span id 是 16 位。</p></div>
+    <div class="term"><span class="k">Observation</span><p>trace 里的一步，可以嵌套。最基本的三类：<code>span</code>（有起止时间的一段工作）、<code>generation</code>（模型调用，带 model、参数、usage、cost、prompt）、<code>event</code>（瞬时事件）。</p></div>
+    <div class="term"><span class="k">Session</span><p>用 <code>session_id</code> 把多轮对话的 trace 串起来，界面上按对话回放。v4 的会话视图把多个 trace 里的用户和助手消息连成一段对话。</p></div>
+    <div class="term"><span class="k">User / Environment / Tags</span><p><code>user_id</code> 用来按用户统计成本和反馈；<code>environment</code> 区分 production、staging；<code>tags</code> 和 <code>metadata</code> 用于筛选。</p></div>
+    <div class="term"><span class="k">Score</span><p>评测结果，四种数据类型：NUMERIC、CATEGORICAL、BOOLEAN、TEXT。来源可以是 SDK/API、界面人工标注、LLM 裁判。可以用 score config 约束取值范围。</p></div>
+    <div class="term"><span class="k">Level / Status</span><p>observation 有 <code>DEBUG</code>、<code>DEFAULT</code>、<code>WARNING</code>、<code>ERROR</code> 四个级别，配合 <code>status_message</code> 标记失败的步骤，方便筛出出错的调用。</p></div>
+  </div>
+  <h3>10 种 observation 类型</h3>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th><code>as_type</code></th><th>含义</th><th>典型例子</th></tr></thead>
+    <tbody>
+      <tr><th><code>span</code></th><td>通用的一段工作，默认类型</td><td>预处理、后处理、业务函数</td></tr>
+      <tr><th><code>generation</code></th><td>模型调用，可以带 model、usage、cost、prompt</td><td>chat completion</td></tr>
+      <tr><th><code>embedding</code></th><td>向量化调用，也可以带 usage 和 cost</td><td>把查询转成向量</td></tr>
+      <tr><th><code>agent</code></th><td>由 LLM 决定流程、会调工具的部分</td><td>agent 主循环</td></tr>
+      <tr><th><code>tool</code></th><td>一次工具或 API 调用</td><td>查订单、跑 SQL</td></tr>
+      <tr><th><code>retriever</code></th><td>只读的检索</td><td>向量库、数据库查询</td></tr>
+      <tr><th><code>chain</code></th><td>把几个步骤连起来的环节</td><td>检索结果交给模型</td></tr>
+      <tr><th><code>evaluator</code></th><td>评估模型输出的步骤</td><td>自检、打分</td></tr>
+      <tr><th><code>guardrail</code></th><td>安全防护</td><td>越狱检测、敏感信息过滤</td></tr>
+      <tr><th><code>event</code></th><td>没有时长的事件</td><td>用户点击、缓存命中</td></tr>
+    </tbody>
+  </table></div>
+  <p>类型主要影响界面上的展示和筛选；成本只对 <code>generation</code> 和 <code>embedding</code> 计算。类型用得准，后面配置 LLM 裁判时才能精确地“只评所有 <code>retriever</code>”或“只评根 observation”。</p>
+  <h3>v4：从 trace 表到 observation 宽表</h3>
+  <div class="grid2">
+    <div class="pt"><h3>v3 的做法 <span class="chip warn">慢</span></h3><p>trace 和 observation 分两张表，SDK 会对同一个 trace 发多次更新（先创建，再补 user_id、输出）。查询时 ClickHouse 要把两张表 join 起来，再对多次更新去重，项目越大越慢。</p></div>
+    <div class="pt"><h3>v4 的做法 <span class="chip tok">快</span></h3><p>SDK（Python 4.7.0+、JS 5.4.0+）在上报前就把 <code>user_id</code>、<code>session_id</code> 等 trace 属性写进每个 observation；每个 observation 完成后只写一次，存进一张只追加、不修改的宽表。查询不用 join 也不用去重，大项目的看板快了至少 10 倍，表格首屏从秒级降到毫秒级。</p></div>
+  </div>
+  <p class="note">v4 带来的使用习惯变化：trace 级的 <code>update_trace()</code> 被拆掉，改用 <code>propagate_attributes()</code>；LLM 裁判推荐挂在 observation 上，trace 级评测器在 Cloud 上 2026 年 11 月 16 日后停止产出结果。想评“整次请求”，就给根 observation 写好输入输出，用 “Is Root Observation” 过滤器去评它。</p>
+</section>
+
+<section id="sdk" class="stack">
+  <div class="sec-head"><span class="eyebrow">接入</span><h2>SDK：基于 OpenTelemetry 的埋点</h2></div>
+  <p>Python SDK v3（2025.06）和 JS/TS SDK v4（2025.08）起，Langfuse 的 SDK 就是一层 OpenTelemetry 封装：每个 observation 是一个 OTel span，通过 OTLP/HTTP 发到 <code>/api/public/otel/v1/traces</code>。好处是上下文传播、异步线程、跨服务调用都交给 OTel，别的框架只要输出 OTel span（尤其是带 <code>gen_ai.*</code> 语义约定属性的），也能直接进 Langfuse。</p>
+<pre><code><span class="cm"># langfuse 5.x，环境变量 LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_BASE_URL</span>
+from langfuse import get_client, observe, propagate_attributes
+
+langfuse = get_client()
+
+@observe(as_type="tool")
+def get_order(order_id: str) -&gt; dict:
+    return db.query(order_id)              <span class="cm"># 入参和返回值自动记为 input / output</span>
+
+@observe(as_type="agent", name="support-agent")
+def handle(user_id: str, chat_id: str, question: str) -&gt; str:
+    with propagate_attributes(user_id=user_id, session_id=chat_id, tags=["support"]):
+        prompt = langfuse.get_prompt("support-system")     <span class="cm"># 默认取 label=production</span>
+        with langfuse.start_as_current_observation(
+            name="answer", as_type="generation", model="gpt-5.4-mini", prompt=prompt,
+        ) as gen:
+            resp = llm(prompt.compile(question=question))
+            gen.update(output=resp.text,
+                       usage_details={"input": resp.in_tok, "output": resp.out_tok})
+        langfuse.score_current_trace(name="answered", value=1, data_type="BOOLEAN")
+        return resp.text
+
+<span class="cm"># 脚本、Serverless、Celery 任务退出前：</span>
+langfuse.flush()</code></pre>
+  <div class="tbl"><table style="min-width:720px">
+    <thead><tr><th>接入方式</th><th>写法</th><th>适合</th></tr></thead>
+    <tbody>
+      <tr><th>装饰器</th><td><code>@observe()</code>，可选 <code>as_type</code>、<code>capture_input=False</code>（入参有敏感信息或太大时关掉）</td><td>按函数粒度埋点，最省事</td></tr>
+      <tr><th>上下文管理器</th><td><code>start_as_current_observation(name=..., as_type=...)</code>，退出时自动结束</td><td>一个函数里有多个步骤，或要手动填 usage</td></tr>
+      <tr><th>手动 observation</th><td><code>start_observation(...)</code> 返回对象，自己调 <code>.end()</code></td><td>起止不在同一个作用域，比如流式输出、回调</td></tr>
+      <tr><th>OpenAI 替身</th><td><code>from langfuse.openai import openai</code>，其余代码不变</td><td>直接用 OpenAI SDK 的项目</td></tr>
+      <tr><th>LangChain / LangGraph</th><td><code>from langfuse.langchain import CallbackHandler</code>，作为 <code>callbacks</code> 传进 <code>invoke</code></td><td>图里每个节点、模型、工具调用自动成为 observation</td></tr>
+      <tr><th>原生 OTel</th><td>其他框架（OpenAI Agents SDK、Pydantic AI、Vercel AI SDK、各类 OpenInference 插桩）把 span 发到 Langfuse 的 OTLP 端点</td><td>多语言、已有 OTel 体系</td></tr>
+    </tbody>
+  </table></div>
+  <h3>几个必须知道的行为</h3>
+  <div class="grid2">
+    <div class="pt"><h3>异步批量上报</h3><p>SDK 用 OTel 的 <code>BatchSpanProcessor</code>：span 结束后进内存队列，后台线程攒够 <code>flush_at</code>（默认 512 个）或每隔 <code>flush_interval</code>（默认 5 秒）发一批，默认 gzip 压缩。业务线程不等网络，Langfuse 挂了也不影响主流程，代价是进程被直接杀掉时队列里的数据会丢。</p></div>
+    <div class="pt"><h3><code>flush()</code> 与 <code>shutdown()</code></h3><p>长期运行的服务不用管，退出时 SDK 会注册清理。Lambda、云函数、一次性脚本、Celery 任务执行完就冻结或退出，后台线程来不及发，必须在返回前调 <code>flush()</code>。这是“本地有数据、线上看不到 trace”最常见的原因。</p></div>
+    <div class="pt"><h3><code>propagate_attributes</code></h3><p>在上下文里设置 <code>user_id</code>、<code>session_id</code>、<code>tags</code>、<code>metadata</code>、<code>version</code>、<code>trace_name</code>，之后创建的所有子 observation 都会带上。要在第一个子 observation 创建<b>之前</b>设置，否则之前创建的 observation 没有这些字段。<code>as_baggage=True</code> 时还会通过 W3C baggage 传到下游服务。值有限制：字符串，最长 200 字符，<code>metadata</code> 的值也会转成字符串。</p></div>
+    <div class="pt"><h3>默认 span 过滤</h3><p>v4 起 SDK 默认只导出三类 span：Langfuse 自己创建的、带 <code>gen_ai.*</code> 属性的、来自已知 LLM 插桩库的。数据库、HTTP 客户端这类通用 span 不再进 Langfuse，trace 更干净。想全收就传 <code>should_export_span=lambda s: True</code>；注意过滤掉父 span 会让子 span 变成“孤儿”。</p></div>
+    <div class="pt"><h3>脱敏</h3><p><code>mask</code> 函数在上报前处理 input、output、metadata；<code>mask_otel_spans</code> 能处理包括第三方插桩在内的原始 OTel span。函数是同步的，要写得快，否则会拖慢导出队列。也可以在 <code>@observe</code> 上用 <code>capture_input=False</code> 干脆不记录。</p></div>
+    <div class="pt"><h3>和已有 OTel 共存</h3><p>如果进程里已经注册了全局 <code>TracerProvider</code>，Langfuse 会复用它，此时 Langfuse 的 span 也可能被发到你的其他后端，反之亦然。想隔离就给 Langfuse 传一个独立的 <code>tracer_provider</code>。下一节会看到，这时 <code>sample_rate</code> 还会失效。</p></div>
+  </div>
+  <p class="note">版本对应：Python SDK v3 用 <code>start_as_current_span</code>、<code>start_as_current_generation</code>；v4 统一成 <code>start_as_current_observation(as_type=...)</code>，<code>update_current_trace()</code> 拆成 <code>propagate_attributes()</code> 等；v5（要求 Python 3.11+、服务端 v4.59.0+）删掉了 <code>api.legacy.*</code> 和 trace 级 input/output 的设置方法。面试时写 v4/v5 的写法更稳妥。</p>
+</section>
+
+<section id="sample" class="stack">
+  <div class="sec-head"><span class="eyebrow">原理</span><h2>采样与 trace id：为什么能跨服务保持一致</h2></div>
+  <p>流量大时没必要全量记录，<code>sample_rate</code>（或环境变量 <code>LANGFUSE_SAMPLE_RATE</code>）设置采样比例，默认 1.0。采样以 trace 为单位：一个 trace 要么整个保留，要么整个丢掉，不会出现半棵树；被丢掉的 trace 上的 score 也不会上报。</p>
+  <p>Python SDK 的实现是给 OTel 的 <code>TracerProvider</code> 装一个 <code>TraceIdRatioBased</code> 采样器，它不掷骰子，而是看 trace id 的低 64 位：</p>
+  <div class="tex-d"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mtext>采样</mtext><mtext>  </mtext><mo>⟺</mo><mtext>  </mtext><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo><mtext>trace_id</mtext><mtext> </mtext><mo lspace="0.22em" rspace="0.22em"><mrow><mi mathvariant="normal">m</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">d</mi></mrow></mo><mtext> </mtext><msup><mn>2</mn><mn>64</mn></msup><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">)</mo><mtext>  </mtext><mo>&lt;</mo><mtext>  </mtext><mi mathvariant="normal">round</mi><mo>⁡</mo><mtext> ⁣</mtext><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo><mi>r</mi><mo>⋅</mo><msup><mn>2</mn><mn>64</mn></msup><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">)</mo></mrow><annotation encoding="application/x-tex">\text{采样} \iff \big(\text{trace\_id} \bmod 2^{64}\big) \;&lt;\; \operatorname{round}\!\big(r \cdot 2^{64}\big)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7073em;vertical-align:-0.024em;"></span><span class="mord text"><span class="mord cjk_fallback">采样</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">⟺</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord"><span class="delimsizing size1">(</span></span><span class="mord text"><span class="mord">trace_id</span></span><span class="mspace" style="margin-right:0.0556em;"></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin"><span class="mord"><span class="mord mathrm">mod</span></span></span><span class="mspace" style="margin-right:0.0556em;"></span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2141em;vertical-align:-0.35em;"></span><span class="mord"><span class="mord">2</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">64</span></span></span></span></span></span></span></span></span><span class="mord"><span class="delimsizing size1">)</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&lt;</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mop"><span class="mord mathrm">round</span></span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="delimsizing size1">(</span></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2141em;vertical-align:-0.35em;"></span><span class="mord"><span class="mord">2</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">64</span></span></span></span></span></span></span></span></span><span class="mord"><span class="delimsizing size1">)</span></span></span></span></span></span></div>
+  <p>随机生成的 trace id 低 64 位均匀分布，所以长期来看采样比例就是 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi></mrow><annotation encoding="application/x-tex">r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span>。关键在于这是 trace id 的<b>确定性函数</b>：</p>
+  <ul>
+    <li>同一个 trace 经过多个服务，只要每个服务用相同的 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi></mrow><annotation encoding="application/x-tex">r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span>，结论就相同，不需要互相通知。</li>
+    <li>采样率小的集合是采样率大的集合的子集：<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi><mo>=</mo><mn>0.1</mn></mrow><annotation encoding="application/x-tex">r=0.1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.1</span></span></span></span> 时保留的 trace，在 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">r=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span> 时一定也保留。所以上游 0.1、下游 0.5 时，上游保留的 trace 下游一定完整。</li>
+    <li>用 <code>Langfuse.create_trace_id(seed="order-1001")</code> 可以从业务 id 生成 trace id（取 SHA-256 的前 16 字节），同一个订单号永远对应同一个 trace id，方便事后查找、补打 score，也意味着“某个订单号会不会被采样”是固定的。</li>
+  </ul>
+  <p class="note">一个真库里验证过的坑：<code>sample_rate</code> 只在 Langfuse 自己创建 <code>TracerProvider</code> 时生效。如果进程里已经有别的库注册了全局 provider，Langfuse 会直接复用它，<code>sample_rate=0.01</code> 被静默忽略，实测 200 个 trace 全部被记录。这时要在你自己的 provider 上配采样器，或者给 Langfuse 传独立的 <code>tracer_provider</code>。</p>
+</section>
+
+<section id="lab1" class="stack">
+  <div class="sec-head"><span class="eyebrow">交互实验</span><h2>采样实验：同一个 trace 在两个服务里的结论</h2></div>
+  <p>输入一组业务 id，页面按 <code>create_trace_id(seed=...)</code> 的算法算出 trace id，再按 <code>TraceIdRatioBased</code> 判断两个服务各自是否采样。默认这 12 个 id 在 0.3 和 0.5 两档下的结果，和 langfuse 5.2.0 加 opentelemetry-sdk 1.45.2 实际创建 span 后 <code>is_recording()</code> 的结果逐个一致。</p>
+  <div class="lab">
+    <div class="row">
+      <label class="fld"><span>服务 A 的 sample_rate</span><input id="sA" type="number" value="0.3" min="0" max="1" step="0.05"></label>
+      <label class="fld"><span>服务 B 的 sample_rate</span><input id="sB" type="number" value="0.5" min="0" max="1" step="0.05"></label>
+      <label class="fld"><span>业务 id（逗号分隔，作为 seed）</span><input id="sSeeds" class="txt" type="text" style="width:min(420px,80vw)" value="order-1001,order-1002,order-1003,order-1004,order-1005,order-1006,order-1007,order-1008,chat-42,req-a,req-b,req-c"></label>
+    </div>
+    <div class="row"><button type="button" id="sRand">换成 200 个随机 trace id</button><button type="button" id="sReset">恢复默认</button></div>
+    <div class="scroll"><svg class="dg" id="sPlot" viewBox="0 0 900 120" role="img" aria-label="数轴 0 到 1 上标出每个 trace id 低 64 位除以 2 的 64 次方的位置，以及两个服务的采样阈值"></svg></div>
+    <div class="legend"><span><i style="background:var(--pos)"></i>两边都采样</span><span><i style="background:var(--warn)"></i>只有 B 采样</span><span><i style="background:var(--seq)"></i>只有 A 采样</span><span><i style="background:var(--surface-2)"></i>都不采样</span></div>
+    <div class="tbl" id="sTblW"><table style="min-width:640px"><thead><tr><th>seed</th><th>trace id（灰色是低 64 位）</th><th class="num">低 64 位 / 2⁶⁴</th><th>A</th><th>B</th></tr></thead><tbody id="sOut"></tbody></table></div>
+    <div class="verdict" id="sVerdict"></div>
+  </div>
+  <p class="note">可以试试：把 A 调到 0.05、B 调到 0.95，A 保留的 trace 一定都在 B 里；把 A 和 B 设成一样，两列永远相同。点“随机 trace id”看大样本下的实际比例，它会在 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi></mrow><annotation encoding="application/x-tex">r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span> 附近波动。</p>
+</section>
+
+<section id="arch" class="stack">
+  <div class="sec-head"><span class="eyebrow">服务端</span><h2>架构：两个容器、四个存储</h2></div>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 300" role="img" aria-label="SDK 通过 OTLP 发给 Langfuse Web；Web 先把原始事件写入 S3，再往 Redis 队列放一个引用；Worker 从队列取引用、从 S3 读事件、写入 ClickHouse；Web 和 Worker 都连 Postgres；Web 从 ClickHouse 查询给界面和 API；Worker 还执行 LLM 裁判评测">
+<rect class="b-io" x="10" y="40" width="150" height="70" rx="6"/><foreignObject x="10" y="40" width="150" height="70"><div class="fo"><span>应用 + SDK</span><span class="fs">OTel span，批量 gzip</span></div></foreignObject>
+<rect class="b-io" x="10" y="190" width="150" height="70" rx="6"/><foreignObject x="10" y="190" width="150" height="70"><div class="fo"><span>界面 / API 用户</span><span class="fs">查询、看板、prompt</span></div></foreignObject>
+<rect class="b-seq" x="230" y="100" width="170" height="90" rx="6"/><foreignObject x="230" y="100" width="170" height="90"><div class="fo"><span>Langfuse Web</span><span class="fs">UI、公开 API、OTLP 摄取<br>无状态，可水平扩展</span></div></foreignObject>
+<rect class="b-ref" x="480" y="20" width="170" height="60" rx="6"/><foreignObject x="480" y="20" width="170" height="60"><div class="fo"><span>S3 / Blob</span><span class="fs">原始事件、多模态附件、导出</span></div></foreignObject>
+<rect class="b-ref" x="480" y="115" width="170" height="60" rx="6"/><foreignObject x="480" y="115" width="170" height="60"><div class="fo"><span>Redis / Valkey</span><span class="fs">队列（只放引用）、缓存</span></div></foreignObject>
+<rect class="b-ref" x="480" y="215" width="170" height="60" rx="6"/><foreignObject x="480" y="215" width="170" height="60"><div class="fo"><span>Postgres</span><span class="fs">项目、API key、prompt、配置</span></div></foreignObject>
+<rect class="b-seq" x="730" y="100" width="100" height="90" rx="6"/><foreignObject x="730" y="100" width="100" height="90"><div class="fo"><span>Worker</span><span class="fs">异步摄取<br>评测、导出</span></div></foreignObject>
+<rect class="b-tok" x="860" y="20" width="90" height="255" rx="6"/><foreignObject x="860" y="20" width="90" height="255"><div class="fo"><span>ClickHouse</span><span class="fs">observation、score<br>（v4：不可变宽表）</span></div></foreignObject>
+<path class="ln arr" d="M160,75 L228,120"/>
+<path class="ln arr" d="M160,225 L228,170"/>
+<path class="ln arr" d="M400,120 L478,55"/>
+<foreignObject x="392" y="56" width="70" height="20"><div class="fo fs"><span>① 先落盘</span></div></foreignObject>
+<path class="ln arr" d="M400,145 L478,145"/>
+<foreignObject x="402" y="124" width="76" height="20"><div class="fo fs"><span>② 放引用</span></div></foreignObject>
+<path class="ln arr" d="M650,145 L728,145"/>
+<foreignObject x="652" y="124" width="76" height="20"><div class="fo fs"><span>③ 取任务</span></div></foreignObject>
+<path class="ln arr" d="M650,55 L740,98"/>
+<foreignObject x="690" y="56" width="70" height="20"><div class="fo fs"><span>④ 读事件</span></div></foreignObject>
+<path class="ln arr" d="M830,145 L858,145"/>
+<foreignObject x="822" y="150" width="40" height="20"><div class="fo fs"><span>⑤</span></div></foreignObject>
+<path class="ln" d="M400,175 L478,240"/>
+<path class="ln" d="M780,190 L780,245 L650,245"/>
+<path class="ln arr" d="M315,190 L315,292 L905,292 L905,277"/>
+<foreignObject x="670" y="272" width="180" height="18"><div class="fo fs"><span>查询走 ClickHouse</span></div></foreignObject>
+</svg>
+    </div>
+    <figcaption>摄取链路：Web 收到一批事件后先写进 S3，再往 Redis 队列放一个指针，立刻返回；Worker 取到指针去 S3 读原始事件，处理后写进 ClickHouse。请求高峰时 Web 不会因为数据库写不过来而超时，数据库短暂故障时事件也还在 S3 里。</figcaption>
+  </figure>
+  <div class="tbl"><table style="min-width:720px">
+    <thead><tr><th>组件</th><th>存什么 / 做什么</th><th>为什么选它</th></tr></thead>
+    <tbody>
+      <tr><th>Langfuse Web</th><td>界面、公开 API、OTLP 摄取入口</td><td>无状态，按流量加副本</td></tr>
+      <tr><th>Langfuse Worker</th><td>从队列消费事件写入 ClickHouse；跑 LLM 裁判、代码评测器、导出任务</td><td>重活放后台，和请求链路解耦</td></tr>
+      <tr><th>Postgres</th><td>事务型数据：组织、项目、用户、API key、prompt、数据集定义、评测器配置</td><td>数据量小，需要事务和强一致</td></tr>
+      <tr><th>ClickHouse</th><td>observation、score 等观测数据</td><td>列存 OLAP，写入量大、按时间范围聚合快；v2 全部存在 Postgres，v3 为了支撑上亿条记录的摄取迁了过来</td></tr>
+      <tr><th>Redis / Valkey</th><td>摄取队列、API key 和 prompt 的服务端缓存</td><td>低延迟；prompt 接口先查 Redis，没有再查 Postgres</td></tr>
+      <tr><th>S3 / Blob</th><td>原始事件、图片音频等多模态附件、大批量导出</td><td>便宜、耐久，作为摄取的缓冲和事实来源</td></tr>
+    </tbody>
+  </table></div>
+  <p>自部署：Docker Compose 只适合本地和测试（单机、无高可用）；生产用 Kubernetes Helm chart 或 AWS、Azure、GCP 的 Terraform 模板，ClickHouse、Postgres、Redis、S3 都可以换成云托管服务。自部署 v3 升级到 v4 有 <code>legacy</code> 和 <code>dual</code> 写入模式，可以分步迁移；用 Helm 自带 ClickHouse 的要先把 chart 从 v1 升到 v2。</p>
+</section>
+
+<section id="prompt" class="stack">
+  <div class="sec-head"><span class="eyebrow">Prompt 管理</span><h2>版本、label 与客户端缓存</h2></div>
+  <p>prompt 写死在代码里，每次改措辞都要发版，也说不清线上用的是哪一版。Langfuse 把 prompt 存在平台上：每次保存生成一个新的<b>版本号</b>（1、2、3…，不可变），再用 <b>label</b> 指向某个版本。<code>production</code> 是默认 label，<code>latest</code> 自动指向最新版本，也可以自定义 <code>staging</code>、<code>tenant-a</code> 等。发布就是把 <code>production</code> 移到新版本，回滚就是移回去，代码不用动。</p>
+<pre><code>prompt = langfuse.get_prompt("support-system")                    <span class="cm"># label=production</span>
+prompt = langfuse.get_prompt("support-system", label="staging")
+prompt = langfuse.get_prompt("support-system", version=7)         <span class="cm"># 固定版本</span>
+prompt = langfuse.get_prompt("support-system", cache_ttl_seconds=0, label="latest")  <span class="cm"># 开发环境</span>
+
+text = prompt.compile(question="能退货吗")       <span class="cm"># 填 {{question}} 变量</span>
+cfg = prompt.config                             <span class="cm"># 模型、温度等也可以跟着 prompt 版本走</span>
+
+<span class="cm"># 把 prompt 挂到 generation 上，平台就能按 prompt 版本统计延迟、成本和 score</span>
+with langfuse.start_as_current_observation(name="answer", as_type="generation", prompt=prompt): ...</code></pre>
+  <p>prompt 分 text 和 chat 两种；可以用 <code>@@@langfusePrompt:name=xxx|label=production@@@</code> 引用别的 prompt 做组合。最有价值的是“链接到 generation”：配合 A/B 两个 label 各给一部分流量，就能直接对比两个版本的线上质量分和成本。</p>
+  <h3>客户端缓存：stale-while-revalidate</h3>
+  <p>如果每次请求都去拉 prompt，Langfuse 就成了业务的单点和延迟来源。SDK 在进程内缓存 prompt，默认 TTL 60 秒（环境变量 <code>LANGFUSE_PROMPT_CACHE_DEFAULT_TTL_SECONDS</code> 可改），规则读源码可以概括成三条：</p>
+  <div class="tbl"><table style="min-width:680px">
+    <thead><tr><th>缓存状态</th><th>行为</th><th>是否阻塞</th></tr></thead>
+    <tbody>
+      <tr><th>没有缓存（进程刚启动）</th><td>同步请求 API；失败时有 <code>fallback</code> 就返回 fallback（<code>is_fallback=True</code>），否则抛异常</td><td class="stop">阻塞</td></tr>
+      <tr><th>未过期</th><td>直接返回缓存</td><td class="flow">不阻塞</td></tr>
+      <tr><th>已过期</th><td>立刻返回<b>旧</b>值，同时把刷新任务放进后台线程；同一个 key 同时只有一个刷新任务；刷新失败就继续用旧值，下次请求再试</td><td class="flow">不阻塞</td></tr>
+      <tr><th><code>cache_ttl_seconds=0</code></th><td>每次都同步请求 API</td><td class="stop">阻塞</td></tr>
+    </tbody>
+  </table></div>
+  <p>过期判断用的是整数秒：缓存写入时记下 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">⌊</mo><msub><mi>t</mi><mtext>写入</mtext></msub><mo stretchy="false">⌋</mo><mo>+</mo><mtext>TTL</mtext></mrow><annotation encoding="application/x-tex">\lfloor t_{\text{写入}} \rfloor + \text{TTL}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">⌊</span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">写入</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">⌋</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord text"><span class="mord">TTL</span></span></span></span></span>，当 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">⌊</mo><mi>t</mi><mo stretchy="false">⌋</mo></mrow><annotation encoding="application/x-tex">\lfloor t \rfloor</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">⌊</span><span class="mord mathnormal">t</span><span class="mclose">⌋</span></span></span></span> <b>大于</b>它时才算过期，所以实际新鲜期在 TTL 到 TTL+1 秒之间。这套设计的结论是：<b>发布新版本后，线上最多要过“TTL + 一次拉取耗时 + 下一次请求到来”这么久才会用上</b>，而且第一个看到过期的请求拿到的仍是旧版本。要立即生效可以调 <code>clear_prompt_cache()</code>，或者在启动时预热。服务端那边，prompt 接口先查 Redis 再查 Postgres；如果服务端返回 404（prompt 被删），SDK 会把缓存清掉。</p>
+</section>
+
+<section id="lab2" class="stack">
+  <div class="sec-head"><span class="eyebrow">交互实验</span><h2>缓存实验：发布新版本后，请求拿到的是哪一版</h2></div>
+  <p>一个进程在给定时刻调用 <code>get_prompt</code>，服务端在某个时刻把 <code>production</code> 从 v1 移到 v2，还可以设置一段 API 故障。下面五个预设场景都用 langfuse 5.2.0 真实运行过（把 API 换成按时间返回版本的假接口，按真实时钟发请求，<code>max_retries=0</code>），每个请求返回的版本、是否阻塞都和模拟一致。</p>
+  <div class="lab">
+    <div class="seg" id="cPre" role="group" aria-label="预设场景"></div>
+    <div class="row">
+      <label class="fld"><span>TTL（秒）</span><input id="cTtl" type="number" value="3" min="0" max="20" step="1"></label>
+      <label class="fld"><span>拉取耗时（秒）</span><input id="cLat" type="number" value="1" min="1" max="6" step="1"></label>
+      <label class="fld"><span>v2 发布时刻</span><input id="cPub" type="number" value="4" min="0" max="30" step="1"></label>
+      <label class="fld"><span>API 故障开始</span><input id="cO1" type="number" value="-1" min="-1" max="30" step="1"></label>
+      <label class="fld"><span>故障结束（不含）</span><input id="cO2" type="number" value="-1" min="-1" max="30" step="1"></label>
+      <label class="chk"><input id="cFb" type="checkbox"> 传了 <code>fallback</code></label>
+    </div>
+    <div class="row"><label class="fld"><span>请求时刻（秒，逗号分隔）</span><input id="cReq" class="txt" type="text" value="0,1,2,5,6,8,9,13"></label></div>
+    <div class="scroll"><svg class="dg" id="cPlot" viewBox="0 0 900 220" role="img" aria-label="时间轴：上方是服务端版本和故障区间，中间是每个请求，下方是同步拉取和后台刷新的时间段"></svg></div>
+    <div class="legend"><span><i style="background:var(--neg)"></i>没缓存，同步拉取</span><span><i style="background:var(--pos)"></i>缓存未过期</span><span><i style="background:var(--warn)"></i>已过期，返回旧值</span><span><i style="background:var(--seq)"></i>后台刷新</span></div>
+    <div class="tbl"><table style="min-width:680px"><thead><tr><th class="num">t</th><th>缓存状态</th><th>服务端</th><th>返回</th><th class="num">阻塞（秒）</th><th>后台刷新</th></tr></thead><tbody id="cOut"></tbody></table></div>
+    <div class="verdict" id="cVerdict"></div>
+  </div>
+  <p class="note">可以试试：“刷新去重”场景里拉取要 3 秒，过期后的 4 个请求只触发一次刷新；“故障回退”里冷启动遇到故障返回 fallback，故障恢复后才拉到真版本；把 TTL 设成 0，每个请求都阻塞，API 一故障就直接报错。真实 SDK 默认会重试 2 次，冷启动时遇到故障会比这里阻塞得更久。</p>
+</section>
+
+<section id="cost" class="stack">
+  <div class="sec-head"><span class="eyebrow">成本</span><h2>token 与成本怎么算</h2></div>
+  <p>成本只记在 <code>generation</code> 和 <code>embedding</code> 上，父节点和 trace 的成本是子节点汇总。每个 generation 有两组数：<code>usage_details</code>（各类 token 的数量）和 <code>cost_details</code>（各类的美元金额）。</p>
+  <div class="tex-d"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mtext>cost</mtext><mtext>  </mtext><mo>=</mo><mtext>  </mtext><munder><mo>∑</mo><mrow><mi>k</mi><mo>∈</mo><mtext>usage 类别</mtext></mrow></munder><msub><mi>u</mi><mi>k</mi></msub><mo>⋅</mo><msub><mi>p</mi><mi>k</mi></msub><mo separator="true">,</mo><mspace width="2em"/><mi>k</mi><mo>∈</mo><mo stretchy="false">{</mo><mtext mathvariant="monospace">input</mtext><mo separator="true">,</mo><mtext> </mtext><mtext mathvariant="monospace">output</mtext><mo separator="true">,</mo><mtext> </mtext><mtext mathvariant="monospace">cache_read_input_tokens</mtext><mo separator="true">,</mo><mtext> </mtext><mo>…</mo><mtext> </mtext><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">\text{cost} \;=\; \sum_{k \in \text{usage 类别}} u_k \cdot p_k ,\qquad k \in \{\texttt{input},\ \texttt{output},\ \texttt{cache\_read\_input\_tokens},\ \dots\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord text"><span class="mord">cost</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4882em;vertical-align:-1.4382em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">∈</span><span class="mord text mtight"><span class="mord mtight">usage </span><span class="mord cjk_fallback mtight">类别</span></span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4382em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">{</span><span class="mord text"><span class="mord texttt">input</span></span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord text"><span class="mord texttt">output</span></span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord text"><span class="mord texttt">cache_read_input_tokens</span></span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mclose">}</span></span></span></span></span></div>
+  <div class="grid2">
+    <div class="pt"><h3>上报的 vs 推算的</h3><p>成本可以直接上报（比如供应商返回了费用，或者有自己的协议价），也可以由 Langfuse 推算：用 generation 的 <code>model</code> 字段去匹配模型定义，拿到单价乘以 usage。两者都有时<b>以上报的为准</b>。只上报 usage 不上报成本是最常见的用法。</p></div>
+    <div class="pt"><h3>模型定义</h3><p>每个模型定义有一个正则 <code>match_pattern</code>，例如 <code>(?i)^(gpt-4o)$</code>，和每类 token 的单价。Langfuse 内置 OpenAI、Anthropic、Google 的定价，自定义的定义优先级更高。自托管模型、协议价都靠自定义模型定义。</p></div>
+    <div class="pt"><h3>usage 的类别要互斥</h3><p>每个 token 只能算一次。OpenAI 返回的 <code>prompt_tokens</code> 包含缓存命中的部分，Langfuse 识别 OpenAI 格式时会把 <code>cached_tokens</code> 从 input 里减掉，单独记为缓存读取，分别按不同单价计费。自己拼 usage 时如果重复计算，成本会偏高。</p></div>
+    <div class="pt"><h3>分档定价与不追溯</h3><p>一个模型可以有多个价格档，比如输入超过 200k token 走长上下文价。按优先级检查条件，第一个满足的生效，都不满足用默认档。成本在<b>摄取时</b>算好存下来，之后改价格只影响新数据，旧的 generation 不会重算。</p></div>
+  </div>
+  <p class="note">Langfuse 已经不再用 tokenizer 根据输入输出估算 token 数。既没有上报 usage 也没有上报成本的 generation，成本就是空的。所以接入自定义模型时，一定要把供应商返回的 usage 填进去。</p>
+</section>
+
+<section id="eval" class="stack">
+  <div class="sec-head"><span class="eyebrow">评测</span><h2>score、LLM 裁判、数据集与实验</h2></div>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" viewBox="0 0 960 230" role="img" aria-label="评测闭环：生产 trace 经过在线评测得到 score，挑出坏例加入数据集，跑离线实验对比新旧版本，CI 门禁通过后把 production label 移到新 prompt 版本，回到生产">
+<rect class="b-io" x="10" y="20" width="170" height="70" rx="6"/><foreignObject x="10" y="20" width="170" height="70"><div class="fo"><span>生产流量</span><span class="fs">trace、observation</span></div></foreignObject>
+<rect class="b-tok" x="230" y="20" width="200" height="70" rx="6"/><foreignObject x="230" y="20" width="200" height="70"><div class="fo"><span>在线评测</span><span class="fs">LLM 裁判、代码评测器<br>用户反馈、人工标注队列</span></div></foreignObject>
+<rect class="b-pos" x="480" y="20" width="180" height="70" rx="6"/><foreignObject x="480" y="20" width="180" height="70"><div class="fo"><span>Score + 看板 + Monitor</span><span class="fs">质量、成本、延迟告警</span></div></foreignObject>
+<rect class="b-ref" x="710" y="20" width="240" height="70" rx="6"/><foreignObject x="710" y="20" width="240" height="70"><div class="fo"><span>坏例进数据集</span><span class="fs">从 trace 一键加入 dataset item<br>（input、expected_output）</span></div></foreignObject>
+<rect class="b-seq" x="710" y="140" width="240" height="70" rx="6"/><foreignObject x="710" y="140" width="240" height="70"><div class="fo"><span>离线实验</span><span class="fs"><code>run_experiment</code>：新 prompt / 模型<br>跑整个数据集，逐条打分</span></div></foreignObject>
+<rect class="b-seq" x="430" y="140" width="230" height="70" rx="6"/><foreignObject x="430" y="140" width="230" height="70"><div class="fo"><span>对比 + CI 门禁</span><span class="fs">实验对比视图；分数低于阈值<br>抛 <code>RegressionError</code></span></div></foreignObject>
+<rect class="b-ref" x="140" y="140" width="240" height="70" rx="6"/><foreignObject x="140" y="140" width="240" height="70"><div class="fo"><span>发布</span><span class="fs">把 <code>production</code> label<br>移到新的 prompt 版本</span></div></foreignObject>
+<line class="ln arr" x1="180" y1="55" x2="228" y2="55"/>
+<line class="ln arr" x1="430" y1="55" x2="478" y2="55"/>
+<line class="ln arr" x1="660" y1="55" x2="708" y2="55"/>
+<line class="ln arr" x1="830" y1="90" x2="830" y2="138"/>
+<line class="ln arr" x1="710" y1="175" x2="662" y2="175"/>
+<line class="ln arr" x1="430" y1="175" x2="382" y2="175"/>
+<path class="ln arr" d="M140,175 L95,175 L95,92"/>
+</svg>
+    </div>
+    <figcaption>线上评测发现问题，坏例沉淀成数据集，改动先在数据集上跑实验，过了门禁再发布。两条线用的是同一套 score，所以线上分数和离线分数可以放在一起看。</figcaption>
+  </figure>
+  <div class="tbl"><table style="min-width:720px">
+    <thead><tr><th>方法</th><th>做法</th><th>注意</th></tr></thead>
+    <tbody>
+      <tr><th>SDK / API 打分</th><td><code>create_score</code>、<code>score_current_trace</code>、<code>score_current_span</code>；打在 observation 上要同时给 observation id 和 trace id；传固定的 <code>score_id</code> 可以幂等覆盖</td><td>用户点赞点踩、业务指标（是否下单）都走这里</td></tr>
+      <tr><th>LLM 裁判</th><td>在界面上配评测器：选目标（observation 或实验）、过滤条件、采样比例、把 <code>{{input}}</code> 等变量映射到 observation 的输入输出或元数据；裁判输出分数和理由</td><td>每次评测本身也生成一个 trace，在 <code>langfuse-llm-as-a-judge</code> 环境里，能看到裁判看了什么；供应商报错时最多重试 4 次</td></tr>
+      <tr><th>代码评测器（v4）</th><td>写 Python 或 TypeScript 的确定性检查，跑在线上 observation 或实验上</td><td>格式校验、JSON 合法性、关键词，比 LLM 裁判便宜且稳定</td></tr>
+      <tr><th>人工标注队列</th><td>把 trace 推进队列，标注员按 score config 打分</td><td>用来校准 LLM 裁判：看人和裁判的一致率</td></tr>
+      <tr><th>数据集与实验</th><td>dataset item 有 <code>input</code>、<code>expected_output</code>、<code>metadata</code>；<code>run_experiment(data=..., task=..., evaluators=[...], run_evaluators=[...])</code> 并发跑任务（默认最多 50 并发），每条结果自动链接到 trace</td><td><code>evaluators</code> 逐条打分，<code>run_evaluators</code> 算整轮的汇总指标；GitHub Action <code>langfuse/experiment-action</code> 把实验接进 PR 流程</td></tr>
+    </tbody>
+  </table></div>
+<pre><code>from langfuse import get_client, Evaluation
+
+langfuse = get_client()
+dataset = langfuse.get_dataset("support-regression")
+
+def task(*, item, **kwargs):
+    return support_agent(item.input["question"])
+
+def exact(*, input, output, expected_output, **kwargs):
+    return Evaluation(name="exact_match", value=float(output == expected_output))
+
+def avg(*, item_results, **kwargs):
+    vals = [e.value for r in item_results for e in r.evaluations if e.name == "exact_match"]
+    return Evaluation(name="avg_exact_match", value=sum(vals) / len(vals))
+
+result = dataset.run_experiment(name="prompt-v8", task=task,
+                                evaluators=[exact], run_evaluators=[avg])
+print(result.format())</code></pre>
+  <p class="note">LLM 裁判的成本要算清楚：每条被评的 observation 都是一次额外的模型调用，官方估计每次 0.01 到 0.1 美元。线上评测几乎都要配采样和过滤，只评关键步骤，简单的检查交给代码评测器。裁判本身的偏差（位置、长度、自我偏好）和缓解方法见本站《大模型评测》一文。</p>
+</section>
+
+<section id="new" class="stack">
+  <div class="sec-head"><span class="eyebrow">2026</span><h2>今年的新变化</h2></div>
+  <div class="tbl"><table style="min-width:720px">
+    <thead><tr><th>变化</th><th>内容</th><th>面试里的意义</th></tr></thead>
+    <tbody>
+      <tr><th>被 ClickHouse 收购（1 月）</th><td>团队并入 ClickHouse，MIT 开源和自部署不变，Cloud 继续独立运营</td><td>Langfuse 本来就跑在 ClickHouse 上，收购后底层存储和产品绑定得更紧</td></tr>
+      <tr><th>v4 数据模型（3 月预览、8 月正式）</th><td>observation 优先、不可变宽表、SDK 端写入 trace 属性；Observations API v2、Metrics API v2</td><td>agent 的 trace 可能有上千个 observation，关键步骤常常不在顶层，平铺可筛选的 observation 表更适合 agent</td></tr>
+      <tr><th>Cloud 只支持 v4（11 月 16 日）</th><td>旧 API、trace 级评测器、旧版 SDK 的摄取路径下线；旧 SDK 的数据会延迟最多 15 分钟</td><td>Python SDK 至少 4.7.0，JS 至少 5.4.0</td></tr>
+      <tr><th>SDK 大版本（10 月）</th><td>Python v5、JS/TS v6：删掉已废弃 API，嵌套 metadata 可以按 <code>a.b</code> 路径过滤，score 可批量创建，实验返回对比页链接</td><td>多数项目只需升级版本号</td></tr>
+      <tr><th>Monitors、Halo、全文搜索</th><td>按成本、质量、延迟阈值发告警（Slack、webhook、GitHub Actions）；Halo 是用自然语言问 trace 和指标的助手</td><td>从“能看”到“能报警”</td></tr>
+      <tr><th>Skill 管理（10 月）</th><td>像 prompt 一样存储和版本化 agent 的 <code>SKILL.md</code> 及附属文件，用 label 发布、回滚，追踪哪些 generation 用了哪些 skill</td><td>agent 的“说明书”也纳入版本管理</td></tr>
+      <tr><th>AI Gateway（11 月公测）</th><td>代理 OpenAI Responses、Chat Completions 和 Anthropic Messages（含流式），不做格式转换；统一管理供应商密钥、按模型授权；每次请求记成一个 generation，可选只记用量不记内容</td><td>和 LiteLLM、Helicone 这类网关形成竞争，适合给内部团队和 coding agent 统一出口</td></tr>
+      <tr><th>其他</th><td>按权限划分的 API key 和过期时间；FIPS 模式的政府版；Claude Platform、Cursor 集成</td><td>企业落地的合规需求</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="cmp" class="stack">
+  <div class="sec-head"><span class="eyebrow">选型</span><h2>Langfuse、LangSmith 和其他方案怎么选</h2></div>
+  <div class="tbl"><table style="min-width:760px">
+    <thead><tr><th>方案</th><th>特点</th><th>适合</th><th>不足</th></tr></thead>
+    <tbody>
+      <tr><th>Langfuse</th><td>MIT 开源可自部署，和框架无关，基于 OTel；观测、prompt、评测一体</td><td>数据不能出内网、多框架混用、想控制成本</td><td>自部署要运维 ClickHouse 等四个存储；和 LangGraph 的深度集成不如 LangSmith</td></tr>
+      <tr><th>LangSmith</th><td>LangChain 公司的商业平台，追踪、评测、prompt、部署（原 LangGraph Platform）</td><td>重度使用 LangChain / LangGraph，需要托管部署</td><td>闭源，自部署要企业版</td></tr>
+      <tr><th>Arize Phoenix</th><td>开源，围绕 OpenInference 插桩和 OTel，评测和实验做得多</td><td>偏 ML 团队、已用 Arize</td><td>prompt 管理等产品功能较轻</td></tr>
+      <tr><th>网关型（Helicone、LiteLLM 等）</th><td>在 API 层代理请求，零代码拿到调用日志和成本</td><td>只关心模型调用的用量和成本</td><td>看不到工具调用、检索等应用内部步骤</td></tr>
+      <tr><th>通用 OTel 后端（Jaeger、Grafana Tempo、Datadog）</th><td>复用现有可观测性体系</td><td>已有成熟 APM，只要延迟和错误率</td><td>没有 prompt、token 成本、评测这些 LLM 专用视图</td></tr>
+    </tbody>
+  </table></div>
+  <p>因为 Langfuse 的 SDK 就是 OTel，两种方案可以并存：同一批 span 一份发 Langfuse 看 LLM 细节，一份发公司的 APM 看整体链路。面试时讲清楚“为什么不能只用传统 APM”和“自部署的运维成本”这两点，比比较功能清单更有说服力。</p>
+</section>
+
+<section id="qa" class="stack">
+  <div class="sec-head"><span class="eyebrow">自测</span><h2>高频追问</h2></div>
+  <div class="tools"><button type="button" id="openAll">全部展开</button><button type="button" id="closeAll">全部收起</button></div>
+  <div class="qa">
+    <details><summary>Langfuse 是什么？和传统 APM 有什么区别？</summary><div class="ans">
+      <p>开源的 LLM 工程平台，做观测、prompt 管理和评测。传统 APM 关心接口延迟和错误率，LLM 应用还要看完整的输入输出、prompt 版本、token 和成本、agent 每一步的决策、回答质量，这些需要专门的数据模型（generation、score、session）和界面。</p></div></details>
+    <details><summary>trace、observation、session、score 分别是什么？</summary><div class="ans">
+      <p>trace 是一次请求，observation 是其中的一步（span、generation、event 等 10 种，可以嵌套），session 用 <code>session_id</code> 把多轮对话的 trace 串起来，score 是评测结果（数值、类别、布尔、文本），可以挂在 trace、observation、session 或数据集实验上。</p></div></details>
+    <details><summary>多轮对话里，trace 和 session 怎么划分？</summary><div class="ans">
+      <p>一条用户消息对应一次请求、一次 agent 运行，是一个 trace；一个聊天窗口是一个 session，用 <code>propagate_attributes(session_id=chat_id)</code> 让这一轮的所有 observation 带上它。例如用户在 <code>chat-42</code> 里发 3 条消息，就是 3 个 trace、1 个 session；换个窗口再问，就是新 session。session 不需要创建，只是相同 <code>session_id</code> 的分组。不要把整段对话塞进一个 trace（根节点迟迟不结束、每轮指标混在一起），也不要每条消息一个 session（看不到上下文）。用 LangGraph 时 <code>thread_id</code> 直接当 <code>session_id</code>。</p></div></details>
+    <details><summary>span 和 generation 有什么区别？</summary><div class="ans">
+      <p>generation 是专门表示模型调用的 observation，多了 <code>model</code>、<code>model_parameters</code>、<code>usage_details</code>、<code>cost_details</code>、<code>prompt</code>、<code>completion_start_time</code>（用来算首 token 延迟）等字段，成本只在 generation 和 embedding 上计算。span 是通用的一段工作。</p></div></details>
+    <details><summary>Langfuse 的 SDK 为什么要基于 OpenTelemetry？</summary><div class="ans">
+      <p>上下文传播（嵌套、异步、线程、跨服务）是 OTel 已经解决好的问题；任何输出 OTel span 的框架都能接入，不用每个框架写一个集成；还能和公司已有的 OTel 体系共存。代价是要理解 TracerProvider、span 过滤这些 OTel 概念，比如已注册全局 provider 时 <code>sample_rate</code> 会失效。</p></div></details>
+    <details><summary>埋点会不会拖慢业务？Langfuse 挂了怎么办？</summary><div class="ans">
+      <p>不会阻塞：span 结束后进内存队列，后台线程按 512 个一批或每 5 秒批量发送，gzip 压缩。Langfuse 不可用时导出失败、重试，最终丢弃，业务不受影响。prompt 拉取有缓存，过期也先返回旧值。真正会阻塞的只有冷启动时第一次拉 prompt，可以用 <code>fallback</code> 兜底。</p></div></details>
+    <details><summary>为什么线上看不到 trace？</summary><div class="ans">
+      <p>最常见是短命进程（Lambda、脚本、Celery 任务）退出前没 <code>flush()</code>；其次是 v4 默认 span 过滤把非 LLM 的 span 丢了、父 span 被过滤导致树断开；还有采样率、密钥和区域地址配错、环境不对。排查时开 <code>debug=True</code> 能看到被丢掉的 span。</p></div></details>
+    <details><summary>采样是怎么做的？多个服务会不会采样结论不一致？</summary><div class="ans">
+      <p>按 trace 采样，用 OTel 的 <code>TraceIdRatioBased</code>：trace id 低 64 位小于 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">round</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>r</mi><mo>⋅</mo><msup><mn>2</mn><mn>64</mn></msup><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\operatorname{round}(r\cdot 2^{64})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">round</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord">2</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">64</span></span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span> 就保留。它是 trace id 的确定性函数，各服务采样率相同时结论一定相同；采样率小的保留集合是采样率大的子集。被丢掉的 trace 上的 score 也不上报。</p></div></details>
+    <details><summary>怎么把业务的订单号和 trace 对应起来？</summary><div class="ans">
+      <p>用 <code>create_trace_id(seed=订单号)</code> 生成确定性的 trace id（SHA-256 前 16 字节），创建 observation 时传 <code>trace_context={"trace_id": ...}</code>。之后用订单号就能算出 trace id，异步补打 score（比如用户第二天退货）也能挂到原来的 trace 上。</p></div></details>
+    <details><summary><code>propagate_attributes</code> 是做什么的？和 v3 的 <code>update_current_trace</code> 有什么区别？</summary><div class="ans">
+      <p>它在上下文里设置 user_id、session_id、tags、metadata 等，之后创建的每个 observation 都会带上这些字段。v3 是事后更新 trace 记录，服务端要合并多次更新；v4 改成每个 observation 自带，服务端不用 join 和去重。要在创建子 observation 之前调用，值是不超过 200 字符的字符串。</p></div></details>
+    <details><summary>Langfuse 自部署需要哪些组件？为什么要 ClickHouse？</summary><div class="ans">
+      <p>Web 和 Worker 两个容器，加 Postgres（事务数据）、ClickHouse（观测数据）、Redis（队列和缓存）、S3（原始事件和附件）。观测数据写入量大、按时间聚合查询多，是典型的 OLAP 场景，v2 全部存在 Postgres，v3 为了支撑上亿条记录换成了列存的 ClickHouse。</p></div></details>
+    <details><summary>摄取为什么先写 S3 再进队列？</summary><div class="ans">
+      <p>削峰和容错。Web 收到事件写进 S3 后只往 Redis 放引用就返回，不等数据库；Worker 按自己的速度消费。流量突增时不会因为数据库写不过来而超时，ClickHouse 短暂故障时事件也还在 S3 里，恢复后重新处理即可。队列里只放引用，也避免 Redis 被大 payload 撑爆。</p></div></details>
+    <details><summary>v4 改了什么？为什么快？</summary><div class="ans">
+      <p>从 trace 表加 observation 表改成一张 observation 宽表：SDK 把 trace 属性写进每个 observation，每个 observation 只写一次、不可修改。v3 查询时要 join 两张表并对多次更新去重，v4 不需要，大项目的看板快了 10 倍以上，也为物化视图等优化打了基础。</p></div></details>
+    <details><summary>prompt 管理的 version 和 label 有什么区别？怎么回滚？</summary><div class="ans">
+      <p>version 是每次保存自动递增、不可变的版本号；label 是可移动的指针，<code>production</code> 是默认，<code>latest</code> 自动指向最新。代码里按 label 取，发布和回滚都是移动 label，不用改代码、不用发版。需要绝对稳定时可以按 version 固定。</p></div></details>
+    <details><summary>prompt 缓存是怎么工作的？发布新版本多久生效？</summary><div class="ans">
+      <p>进程内缓存，默认 TTL 60 秒，stale-while-revalidate：没缓存时同步拉；未过期直接返回；过期后先返回旧值，后台单线程刷新，同一个 key 只刷一次。所以新版本要等缓存过期、下一次请求触发刷新、刷新完成之后才生效，第一个看到过期的请求拿到的还是旧版本。要立即生效可以 <code>clear_prompt_cache()</code>。</p></div></details>
+    <details><summary>成本是怎么算的？为什么我的成本是空的或者不对？</summary><div class="ans">
+      <p>有上报的成本就用上报的；否则用 <code>model</code> 去正则匹配模型定义，按单价乘以各类 usage。成本空：没上报 usage，或者模型名匹配不上任何定义（Langfuse 已不再自己估算 token）。成本偏高：usage 类别重复计算了缓存 token。改价格不会追溯历史数据。</p></div></details>
+    <details><summary>线上怎么做自动评测？要注意什么？</summary><div class="ans">
+      <p>配 LLM 裁判评测器，目标选 observation（v4 推荐）或实验，用过滤条件和采样比例控制范围，把输入输出映射到 prompt 变量，输出分数和理由。注意成本（每次是一次模型调用）、裁判本身的偏差（要用人工标注队列校准一致率），简单的规则检查用代码评测器。</p></div></details>
+    <details><summary>数据集实验怎么接进 CI？</summary><div class="ans">
+      <p>维护一个回归数据集（多来自线上坏例），PR 里用 <code>run_experiment</code> 让新版本跑一遍，<code>evaluators</code> 逐条打分、<code>run_evaluators</code> 算汇总，分数低于阈值就抛 <code>RegressionError</code> 让 CI 失败；官方提供 <code>langfuse/experiment-action</code>。实验结果和每条 trace 链接，在对比视图里看新旧版本的差异。</p></div></details>
+    <details><summary>怎么处理敏感数据？</summary><div class="ans">
+      <p>上报前用 <code>mask</code> 或 <code>mask_otel_spans</code> 脱敏，或在 <code>@observe</code> 上关闭 <code>capture_input</code>、<code>capture_output</code>；数据不能出境就自部署或选对应区域（Cloud 有 EU、US、JP、HIPAA 区域）；配数据保留策略；API key 按最小权限划分。</p></div></details>
+    <details><summary>Langfuse 和 LangSmith 怎么选？</summary><div class="ans">
+      <p>Langfuse 开源可自部署、与框架无关、基于 OTel；LangSmith 是商业产品，和 LangChain、LangGraph 集成最深，并提供托管部署。数据要留在内网、技术栈混杂、在意成本选 Langfuse；全家桶用 LangChain 并需要托管部署可以选 LangSmith。Langfuse 也能通过 <code>CallbackHandler</code> 追踪 LangGraph。</p></div></details>
+  </div>
+</section>
+
+<section id="tpl" class="stack">
+  <div class="sec-head"><span class="eyebrow">2 分钟口述</span><h2>答题模板</h2></div>
+  <ol class="tpl">
+    <li><b>先讲定位。</b>开源的 LLM 工程平台，观测、prompt 管理、评测三件事形成闭环；MIT 协议可自部署，2026 年被 ClickHouse 收购。</li>
+    <li><b>讲数据模型。</b>trace 里嵌套 observation（generation 带 model、usage、cost、prompt），session 串多轮，score 是评测结果；v4 改成 observation 优先的不可变宽表，trace 属性由 SDK 写进每一行。</li>
+    <li><b>讲 SDK。</b>基于 OpenTelemetry，<code>@observe</code> 和上下文管理器埋点，<code>propagate_attributes</code> 传用户和会话；后台批量异步上报，短命进程要 <code>flush()</code>；按 trace id 确定性采样，跨服务一致。</li>
+    <li><b>讲架构。</b>Web、Worker 加 Postgres、ClickHouse、Redis、S3；先写 S3 再放队列引用，Worker 异步写 ClickHouse，用来削峰和容错。</li>
+    <li><b>讲 prompt 和评测。</b>version 不可变、label 可移动，发布和回滚都是移 label；客户端缓存 stale-while-revalidate；成本按 usage 乘单价、摄取时算定；在线用 LLM 裁判和代码评测器，离线用数据集实验接 CI。</li>
+  </ol>
+  <p class="note">常见失分点：说 SDK 每次调用都同步上报（是后台批量）；说采样是随机掷骰子（是 trace id 的确定性函数）；以为设了 <code>sample_rate</code> 就一定生效（已有全局 TracerProvider 时被忽略）；说改了 prompt 立刻生效（要等缓存过期并刷新）；说 Langfuse 会自己估算 token（已经不估了）；说改模型价格会重算历史成本（不追溯）；还在用 v3 的 <code>start_as_current_span</code> 和 <code>update_current_trace</code>。</p>
+  <div class="src">资料来源：
+    <ul>
+      <li><a href="https://langfuse.com/handbook/chapters/story">Langfuse 发展历程</a>、<a href="https://langfuse.com/blog/joining-clickhouse">Langfuse joins ClickHouse</a>、<a href="https://langfuse.com/changelog/2025-06-04-open-sourcing-langfuse">全部功能开源</a></li>
+      <li><a href="https://langfuse.com/changelog/2026-08-17-langfuse-v4">Langfuse v4 发布</a>、<a href="https://langfuse.com/changelog/2026-03-10-simplify-for-scale">observation 优先的数据模型</a>、<a href="https://langfuse.com/faq/all/upgrade-to-langfuse-v4">v4 迁移</a>、<a href="https://langfuse.com/changelog/2026-10-14-python-sdk-v5-js-sdk-v6">Python SDK v5 与 JS SDK v6</a>、<a href="https://langfuse.com/blog/2026-10-31-langfuse-october-update">2026 年 10 月更新</a>、<a href="https://langfuse.com/changelog/2026-11-04-ai-gateway-public-beta">AI Gateway 公测</a></li>
+      <li>文档：<a href="https://langfuse.com/docs/observability/data-model">数据模型</a>、<a href="https://langfuse.com/docs/observability/features/observation-types">observation 类型</a>、<a href="https://langfuse.com/docs/observability/sdk/upgrade-path/python-v3-to-v4">Python SDK v3 → v4</a>、<a href="https://langfuse.com/docs/observability/features/sampling">采样</a>、<a href="https://langfuse.com/docs/prompt-management/features/caching">prompt 缓存</a>、<a href="https://langfuse.com/docs/observability/features/token-and-cost-tracking">成本追踪</a>、<a href="https://langfuse.com/docs/evaluation/evaluation-methods/llm-as-a-judge">LLM 裁判</a>、<a href="https://langfuse.com/self-hosting">自部署架构</a></li>
+      <li>源码：<a href="https://pypi.org/project/langfuse/">langfuse 5.2.0</a>（<code>_client/client.py</code> 的 <code>create_trace_id</code>、<code>get_prompt</code>，<code>_client/resource_manager.py</code>，<code>_utils/prompt_cache.py</code>，<code>_client/span_filter.py</code>）、opentelemetry-sdk 1.45.2（<code>TraceIdRatioBased</code>）；两个实验的结果都用真库实际跑过</li>
+    </ul>
+  </div>
+</section>
+
+</div>
+
+<script>
+/* 两个实验共用的纯逻辑：sha256、种子 trace id、TraceIdRatioBased 判定、prompt 缓存模拟 */
+function sha256Hex(str){
+  var bytes=new TextEncoder().encode(str);
+  var K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  var H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  var l=bytes.length, n=((l+9+63)>>6)<<6, m=new Uint8Array(n);
+  m.set(bytes); m[l]=0x80;
+  var bits=l*8; for(var i=0;i<8;i++){m[n-1-i]=bits&0xff; bits=Math.floor(bits/256);}
+  var w=new Array(64);
+  function rr(x,k){return (x>>>k)|(x<<(32-k));}
+  for(var o=0;o<n;o+=64){
+    for(var t=0;t<16;t++)w[t]=(m[o+4*t]<<24)|(m[o+4*t+1]<<16)|(m[o+4*t+2]<<8)|m[o+4*t+3];
+    for(t=16;t<64;t++){var s0=rr(w[t-15],7)^rr(w[t-15],18)^(w[t-15]>>>3),s1=rr(w[t-2],17)^rr(w[t-2],19)^(w[t-2]>>>10);w[t]=(w[t-16]+s0+w[t-7]+s1)|0;}
+    var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+    for(t=0;t<64;t++){
+      var S1=rr(e,6)^rr(e,11)^rr(e,25),ch=(e&f)^(~e&g),t1=(h+S1+ch+K[t]+w[t])|0;
+      var S0=rr(a,2)^rr(a,13)^rr(a,22),mj=(a&b)^(a&c)^(b&c),t2=(S0+mj)|0;
+      h=g;g=f;f=e;e=(d+t1)|0;d=c;c=b;b=a;a=(t1+t2)|0;
+    }
+    H[0]=(H[0]+a)|0;H[1]=(H[1]+b)|0;H[2]=(H[2]+c)|0;H[3]=(H[3]+d)|0;H[4]=(H[4]+e)|0;H[5]=(H[5]+f)|0;H[6]=(H[6]+g)|0;H[7]=(H[7]+h)|0;
+  }
+  return H.map(function(x){return ("00000000"+(x>>>0).toString(16)).slice(-8);}).join("");
+}
+/* Langfuse.create_trace_id(seed=...)：sha256(seed) 的前 16 字节 */
+function seedTraceId(seed){return sha256Hex(seed).slice(0,32);}
+/* OTel TraceIdRatioBased：trace_id 低 64 位 < round(rate * 2^64) */
+function sampled(traceId,rate){
+  var low=BigInt("0x"+traceId.slice(16));
+  var bound=BigInt(Math.round(rate*Math.pow(2,64)));
+  return low<bound;
+}
+function lowFrac(traceId){return Number(BigInt("0x"+traceId.slice(16)))/Math.pow(2,64);}
+
+/* 模拟 langfuse Python SDK get_prompt 的客户端缓存（整数秒，API 故障时立即失败、不重试） */
+function cacheSim(sc){
+  var ttl=sc.ttl, lat=sc.lat, pub=sc.pub, out=sc.outage||[-1,-1], fb=!!sc.fallback;
+  var reqs=sc.req.slice().sort(function(a,b){return a-b;});
+  var cache=null, pend=[], bgBusy=false, rows=[], fetches=[];
+  function down(t){return t>=out[0]&&t<out[1];}
+  function srv(t){return t>=pub?2:1;}
+  function settle(t){
+    pend.sort(function(a,b){return a.done-b.done;});
+    while(pend.length&&pend[0].done<t){var p=pend.shift();cache={v:p.v,expiry:Math.floor(p.done)+ttl};if(p.bg)bgBusy=false;p.expiry=cache.expiry;}
+  }
+  function fetch(t,bg){
+    if(down(t)){ if(bg)bgBusy=false; fetches.push({start:t,done:t,bg:bg,fail:true}); return null; }
+    var p={start:t,done:t+lat,v:srv(t),bg:bg}; pend.push(p); fetches.push(p); return p;
+  }
+  reqs.forEach(function(t){
+    settle(t);
+    var r={t:t,cacheV:cache?cache.v:null,expiry:cache?cache.expiry:null};
+    if(cache===null||ttl===0){
+      r.kind=cache===null?"miss":"ttl0";
+      var p=fetch(t,false);
+      if(p){r.val="v"+p.v;r.wait=lat;}
+      else{r.val=fb?"fallback":"error";r.wait=0;}
+    }else if(Math.floor(t)>cache.expiry){
+      r.kind="stale"; r.val="v"+cache.v; r.wait=0;
+      if(bgBusy){r.bg="dedup";}
+      else{bgBusy=true; var q=fetch(t,true); r.bg=q?"start":"fail";}
+    }else{r.kind="fresh";r.val="v"+cache.v;r.wait=0;}
+    r.server="v"+srv(t);
+    rows.push(r);
+  });
+  settle(Infinity);
+  return {rows:rows,fetches:fetches};
+}
+(function(){
+  function $(id){return document.getElementById(id);}
+  var NS="http://www.w3.org/2000/svg";
+  function el(tag,attrs,parent,text){var e=document.createElementNS(NS,tag);for(var k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+  function clamp(x,a,b){return Math.min(b,Math.max(a,x));}
+  function num(id,def,a,b){var v=parseFloat($(id).value);return isNaN(v)?def:clamp(v,a,b);}
+  function pct(x){return (x*100).toFixed(1)+"%";}
+
+  /* ---------- lab1: 采样 ---------- */
+  var DEF_SEEDS=$("sSeeds").value, randIds=null;
+  function randHex(){var a=new Uint8Array(16);(window.crypto||{getRandomValues:function(x){for(var i=0;i<x.length;i++)x[i]=Math.floor(Math.random()*256);return x;}}).getRandomValues(a);return Array.prototype.map.call(a,function(b){return ("0"+b.toString(16)).slice(-2);}).join("");}
+  function srun(){
+    var rA=num("sA",0.3,0,1), rB=num("sB",0.5,0,1);
+    var items;
+    if(randIds){items=randIds.map(function(t,i){return {seed:"随机 #"+(i+1),tid:t};});}
+    else{items=$("sSeeds").value.split(",").map(function(s){return s.trim();}).filter(function(s){return s.length;}).slice(0,60).map(function(s){return {seed:s,tid:seedTraceId(s)};});}
+    items.forEach(function(it){it.u=lowFrac(it.tid);it.a=sampled(it.tid,rA);it.b=sampled(it.tid,rB);});
+    /* plot */
+    var svg=$("sPlot");svg.innerHTML="";
+    var x0=40,x1=800,y=72;function X(u){return x0+(x1-x0)*u;}
+    el("line",{x1:x0,y1:y,x2:x1,y2:y,"class":"ax"},svg);
+    [0,0.25,0.5,0.75,1].forEach(function(u){el("line",{x1:X(u),y1:y-4,x2:X(u),y2:y+4,"class":"ax"},svg);el("text",{x:X(u),y:y+20,"class":"c s"},svg,String(u));});
+    el("text",{x:x1+10,y:y+4,"class":"s"},svg,"低 64 位 / 2⁶⁴");
+    [[rA,"A",14,"var(--seq)"],[rB,"B",34,"var(--warn)"]].forEach(function(z){
+      el("line",{x1:X(z[0]),y1:z[2]+6,x2:X(z[0]),y2:y+8,stroke:z[3],"stroke-width":2,"stroke-dasharray":"4 3"},svg);
+      el("text",{x:X(z[0]),y:z[2],"class":"c m"},svg,z[1]+"：r = "+z[0]);
+    });
+    items.forEach(function(it,i){
+      var col=it.a&&it.b?"var(--pos)":it.b?"var(--warn)":it.a?"var(--seq)":"var(--surface-2)";
+      var yy=items.length>20?y-10+((i*7)%21):y;
+      var c=el("circle",{cx:X(it.u),cy:yy,r:items.length>20?3.5:5.5,fill:col,stroke:"var(--ink)","stroke-width":0.8},svg);
+      el("title",{},c,it.seed+"："+it.u.toFixed(4));
+    });
+    /* table */
+    var show=items.length>24?items.slice(0,12):items, h="";
+    show.forEach(function(it){
+      h+="<tr><th><code>"+it.seed.replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</code></th><td><code>"+it.tid.slice(0,16)+"<span style=\"color:var(--muted)\">"+it.tid.slice(16)+"</span></code></td><td class=\"num\">"+it.u.toFixed(4)+"</td><td class=\""+(it.a?"posv":"")+"\">"+(it.a?"保留":"丢弃")+"</td><td class=\""+(it.b?"posv":"")+"\">"+(it.b?"保留":"丢弃")+"</td></tr>";
+    });
+    if(items.length>show.length)h+="<tr><td colspan=\"5\" style=\"color:var(--muted)\">只列出前 12 个，共 "+items.length+" 个</td></tr>";
+    $("sOut").innerHTML=h;
+    var n=items.length,na=items.filter(function(i){return i.a;}).length,nb=items.filter(function(i){return i.b;}).length;
+    var aOnly=items.filter(function(i){return i.a&&!i.b;}).length,bOnly=items.filter(function(i){return i.b&&!i.a;}).length;
+    var v="A 保留 "+na+" / "+n+"（"+(n?pct(na/n):"–")+"），B 保留 "+nb+" / "+n+"（"+(n?pct(nb/n):"–")+"）。";
+    if(rA===rB)v+="两个服务采样率相同，每个 trace 的结论完全一致，不会出现只在一边被记录的半截 trace。";
+    else if(rA<rB)v+="A 的采样率更小，A 保留的 trace 全部也被 B 保留（只在 A 保留："+aOnly+" 个），只在 B 保留的有 "+bOnly+" 个。";
+    else v+="A 的采样率更大，B 保留的 trace 全部也被 A 保留（只在 B 保留："+bOnly+" 个），只在 A 保留的有 "+aOnly+" 个。";
+    $("sVerdict").textContent=v;
+  }
+  ["sA","sB","sSeeds"].forEach(function(id){$(id).addEventListener("input",function(){if(id==="sSeeds")randIds=null;srun();});});
+  $("sRand").addEventListener("click",function(){randIds=[];for(var i=0;i<200;i++)randIds.push(randHex());srun();});
+  $("sReset").addEventListener("click",function(){randIds=null;$("sA").value=0.3;$("sB").value=0.5;$("sSeeds").value=DEF_SEEDS;srun();});
+  srun();
+
+  /* ---------- lab2: prompt 缓存 ---------- */
+  var PRE=[
+    ["默认",{ttl:3,lat:1,pub:4,o1:-1,o2:-1,fb:false,req:"0,1,2,5,6,8,9,13"}],
+    ["刷新去重",{ttl:2,lat:3,pub:5,o1:-1,o2:-1,fb:false,req:"0,4,6,7,8,9,10,13,14"}],
+    ["故障回退",{ttl:2,lat:1,pub:3,o1:0,o2:2,fb:true,req:"0,1,2,4,6,7,9,10,12"}],
+    ["后台刷新失败",{ttl:2,lat:1,pub:3,o1:6,o2:9,fb:false,req:"0,6,7,8,9,10,11"}],
+    ["TTL = 0",{ttl:0,lat:1,pub:3,o1:5,o2:7,fb:false,req:"0,2,4,5,6,8"}]
+  ];
+  var curPre=0;
+  function drawPre(){var g=$("cPre");g.innerHTML="";PRE.forEach(function(p,i){var b=document.createElement("button");b.type="button";b.textContent=p[0];b.setAttribute("aria-pressed",i===curPre);b.addEventListener("click",function(){curPre=i;load(p[1]);});g.appendChild(b);});}
+  function load(p){$("cTtl").value=p.ttl;$("cLat").value=p.lat;$("cPub").value=p.pub;$("cO1").value=p.o1;$("cO2").value=p.o2;$("cFb").checked=p.fb;$("cReq").value=p.req;drawPre();crun();}
+  var KIND={miss:"没有缓存",ttl0:"TTL = 0",fresh:"未过期",stale:"已过期"};
+  var KCOL={miss:"var(--neg)",ttl0:"var(--neg)",fresh:"var(--pos)",stale:"var(--warn)"};
+  var BG={start:"触发刷新",dedup:"已有刷新任务，跳过",fail:"触发，但 API 故障失败"};
+  function crun(){
+    var sc={ttl:Math.round(num("cTtl",3,0,20)),lat:Math.round(num("cLat",1,1,6)),pub:Math.round(num("cPub",4,0,30)),fallback:$("cFb").checked};
+    var o1=Math.round(num("cO1",-1,-1,30)),o2=Math.round(num("cO2",-1,-1,30));sc.outage=o2>o1?[o1,o2]:[-1,-1];
+    sc.req=$("cReq").value.split(",").map(function(s){return parseFloat(s);}).filter(function(x){return !isNaN(x);}).map(function(x){return clamp(Math.round(x),0,40);}).slice(0,30);
+    var r=cacheSim(sc);
+    var T=Math.max.apply(null,[sc.pub+1,sc.outage[1]].concat(sc.req,r.fetches.map(function(f){return f.done;})))+1;
+    T=Math.max(T,6);
+    var svg=$("cPlot");svg.innerHTML="";
+    var x0=90,x1=880;function X(t){return x0+(x1-x0)*t/T;}
+    /* 同步拉取可能并发，分车道摆放 */
+    var lanes=[];r.fetches.filter(function(f){return !f.bg;}).forEach(function(f){var i=0;while(lanes[i]!=null&&lanes[i]>=f.start)i++;lanes[i]=f.done;f.lane=i;});
+    var nl=Math.max(1,lanes.length), maxReq=0, cc={};r.rows.forEach(function(q){cc[q.t]=(cc[q.t]||0)+1;maxReq=Math.max(maxReq,cc[q.t]);});
+    var yReq=72, ySync=yReq+(maxReq-1)*12+28, yBg=ySync+nl*14+10, ya=yBg+34, H=ya+24;
+    svg.setAttribute("viewBox","0 0 900 "+H);
+    /* 行标签 */
+    [["服务端",22],["请求",yReq],["同步拉取",ySync+5],["后台刷新",yBg+5]].forEach(function(z){el("text",{x:8,y:z[1]+4,"class":"s"},svg,z[0]);});
+    /* 服务端版本 */
+    el("rect",{x:X(0),y:12,width:X(Math.min(sc.pub,T))-X(0),height:20,"class":"b-io",rx:3},svg);
+    if(sc.pub>0)el("text",{x:(X(0)+X(Math.min(sc.pub,T)))/2,y:22,"class":"c m"},svg,"production → v1");
+    if(sc.pub<T){el("rect",{x:X(sc.pub),y:12,width:X(T)-X(sc.pub),height:20,"class":"b-tok",rx:3},svg);el("text",{x:(X(sc.pub)+X(T))/2,y:22,"class":"c m"},svg,"production → v2");}
+    if(sc.outage[1]>sc.outage[0]){el("rect",{x:X(Math.max(0,sc.outage[0])),y:8,width:X(Math.min(T,sc.outage[1]))-X(Math.max(0,sc.outage[0])),height:yBg+18,fill:"var(--neg)","fill-opacity":0.12,stroke:"var(--neg)","stroke-dasharray":"4 3"},svg);el("text",{x:X(Math.max(0,sc.outage[0]))+4,y:44,"class":"s",style:"fill:var(--neg)"},svg,"API 故障");}
+    /* 拉取 */
+    r.fetches.forEach(function(f){
+      var yy=f.bg?yBg:ySync+(f.lane||0)*14;
+      if(f.fail){el("text",{x:X(f.start),y:yy+6,"class":"c",style:"fill:var(--neg);font-weight:700"},svg,"✕");return;}
+      el("rect",{x:X(f.start),y:yy,width:Math.max(3,X(f.done)-X(f.start)),height:11,rx:3,fill:f.bg?"var(--seq)":"var(--neg)","fill-opacity":0.85},svg);
+      el("text",{x:X(f.done)+4,y:yy+9,"class":"m"},svg,"v"+f.v);
+    });
+    /* 请求 */
+    var cnt={};
+    r.rows.forEach(function(q){
+      var k=cnt[q.t]=(cnt[q.t]||0)+1, yy=yReq+(k-1)*12;
+      var c=el("circle",{cx:X(q.t),cy:yy,r:6,fill:KCOL[q.kind],stroke:"var(--ink)","stroke-width":0.8},svg);
+      el("title",{},c,"t="+q.t+" "+KIND[q.kind]+"，返回 "+q.val);
+      if(k===1)el("text",{x:X(q.t),y:56,"class":"c m"},svg,q.val==="fallback"?"fb":q.val==="error"?"err":q.val);
+    });
+    /* 轴 */
+    el("line",{x1:X(0),y1:ya,x2:X(T),y2:ya,"class":"ax"},svg);
+    var step=T>24?4:T>12?2:1;
+    for(var t=0;t<=T;t+=step){el("line",{x1:X(t),y1:ya-4,x2:X(t),y2:ya+4,"class":"ax"},svg);el("text",{x:X(t),y:ya+15,"class":"c s"},svg,t+"s");}
+    /* 表 */
+    var h="";
+    r.rows.forEach(function(q){
+      var lag=(q.val==="v1"||q.val==="v2")&&q.val!==q.server;
+      h+="<tr><td class=\"num\">"+q.t+"</td><td>"+KIND[q.kind]+(q.expiry!=null&&q.kind!=="ttl0"?"<span style=\"color:var(--muted)\">（过期于 "+q.expiry+"）</span>":"")+"</td><td><code>"+q.server+"</code></td><td class=\""+(lag?"cut":"")+"\"><code>"+q.val+"</code></td><td class=\"num\">"+q.wait+"</td><td>"+(q.bg?BG[q.bg]:"")+"</td></tr>";
+    });
+    $("cOut").innerHTML=h;
+    var after=r.rows.filter(function(q){return q.t>=sc.pub;});
+    var lagged=after.filter(function(q){return q.val==="v1";});
+    var firstV2=r.rows.filter(function(q){return q.val==="v2";})[0];
+    var blocked=r.rows.filter(function(q){return q.wait>0;}).length;
+    var fbn=r.rows.filter(function(q){return q.val==="fallback";}).length, errn=r.rows.filter(function(q){return q.val==="error";}).length;
+    var v="";
+    if(after.length)v+="v2 在 t="+sc.pub+" 发布，之后的 "+after.length+" 个请求里有 "+lagged.length+" 个还拿到 v1"+(lagged.length?"（最后一个在 t="+lagged[lagged.length-1].t+"）":"")+"；";
+    v+=firstV2?"第一个拿到 v2 的请求在 t="+firstV2.t+"。":"没有请求拿到 v2。";
+    v+=" 共 "+blocked+" 个请求阻塞等待 API";
+    if(fbn)v+="，"+fbn+" 个返回 fallback";
+    if(errn)v+="，"+errn+" 个直接报错";
+    v+="。";
+    $("cVerdict").textContent=v;
+  }
+  ["cTtl","cLat","cPub","cO1","cO2","cFb","cReq"].forEach(function(id){$(id).addEventListener("input",crun);});
+  drawPre();crun();
+
+  var ds=document.querySelectorAll("#qa details");
+  $("openAll").addEventListener("click",function(){ds.forEach(function(d){d.open=true;});});
+  $("closeAll").addEventListener("click",function(){ds.forEach(function(d){d.open=false;});});
+})();
+</script>
+</body>
+</html>
