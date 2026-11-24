@@ -220,25 +220,25 @@ html{scroll-behavior:smooth}
     <p><b>连接器与高分辨率</b>：纯 Linear/MLP 保留全部空间信息但 token 太长；Q-Former / Resampler 压成定长（如 32/64 个 token）但丢细节、OCR 差；现代主流是 <mark>Pixel Shuffle / 2×2 Patch Merger + 2 层 MLP</mark>，把 token 砍到 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>4</mn></mrow><annotation encoding="application/x-tex">1/4</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/4</span></span></span></span> 同时保住局部结构。高清图处理分两条路：<b>AnyRes 动态切图</b>（InternVL、LLaVA-NeXT，切 tile + 全局缩略图）vs <b>NaViT 原生动态分辨率</b>（Qwen2/2.5/3-VL，不切图直接按原比例打包进变长序列，配合 2D-RoPE 与局部窗口注意力）。</p>
     <p><b>位置编码、Mask 与训练</b>：展平 2D 图像会让上下相邻 patch 在 1D 序列里距离失真，现代方案把 1D RoPE 拆成时间、高、宽三组频率（<b>MRoPE / Interleaved-MRoPE</b>），文本位置三坐标相同、严格退化回 1D RoPE。视觉理解任务的 <b>loss mask</b> 只算模型回答文本，不算图像占位符和提问。训练分四步：① 冻结主干只训 Connector 对齐；② 解冻联合持续预训练（必须混 15%–30% 纯文本防遗忘）；③ 多模态 SFT；④ DPO / GRPO 抑幻觉、提推理。</p>
     <p><b>多下游任务统一</b>：不再像传统 CV 给每个任务挂专用头，而是把 VQA、OCR（Markdown/LaTeX）、目标检测 Grounding（归一化 <code>[0,1000)</code> 或绝对像素坐标 JSON）、GUI 点击动作、视频时间戳定位全部统一成 <mark>Prompt 路由 + 结构化文本 Next-Token Prediction</mark>；只有像素级分割（Segmentation）等超密输出才通过特殊 <code>&lt;SEG&gt;</code> token 接轻量 SAM Decoder 或调用外部工具完成。多任务混训靠温度采样和样本级/加权 Loss 防止长回复（OCR）淹没短输出（坐标/点选）。</p>
-    <p><b>统一理解与生成</b>：理解要抽象语义、生成要保真像素，存在表征冲突。早期 <b>VQ 离散自回归</b>（Chameleon、Emu3）统一用 Next-Token Prediction 但量化损细节；当前主流转向<b>解耦编码器 + 连续 Diffusion / Flow Matching</b>（Transfusion、Janus-Pro、BAGEL），或用 Mixture-of-Transformers（MoT）按模态分设 FFN、共享注意力。</p>
+    <p><b>统一理解与生成</b>：理解要抽象语义、生成要保真像素，存在表征冲突。早期 <b>VQ 离散自回归</b>（Chameleon、Emu3）统一用 Next-Token Prediction 但量化损细节；也可<b>解耦理解与生成的视觉表示</b>：Janus-Pro 自回归生成离散图像 token，BAGEL 则对连续图像潜变量去噪。还可用 Mixture-of-Transformers（MoT）按模态分设 FFN、共享注意力。</p>
   </div>
 </section>
 
 <section id="paradigm" class="stack">
   <div class="sec-head"><span class="eyebrow">架构全景</span><h2>四种多模态架构范式</h2></div>
-  <p>把图像接入大语言模型，核心分歧在两个问题：<b>视觉特征要不要先过一个独立编码器</b>，以及<b>视觉信息和文本在 LLM 的哪一层汇合</b>。按这两条轴，演进出了四种典型范式。</p>
+  <p>把图像接入大语言模型，核心分歧在两个问题：<b>视觉特征要不要先过一个独立编码器</b>，以及<b>视觉信息和文本在 LLM 的哪一层汇合</b>。前三类按视觉特征如何接入 LLM 区分；第四类回答的是另一个问题：同一模型怎样既读图又出图，因此可以和前三类重叠。</p>
   <figure>
     <div class="scroll">
-      <svg class="dg" viewBox="0 0 960 350" role="img" aria-label="四种多模态架构范式对比：1. Encoder加MLP输入级拼接（LLaVA、Qwen-VL、InternVL）；2. Encoder加Cross-Attention中间层注入（Flamingo、Llama 3.2 Vision）；3. Encoder-Free原生早期融合（Fuyu、Chameleon）；4. 统一理解与生成解耦双路加Diffusion（Janus-Pro、Transfusion）">
+      <svg class="dg" viewBox="0 0 960 350" role="img" aria-label="四种多模态架构范式对比：1. Encoder加MLP输入级拼接（LLaVA-1.5、Qwen3.5）；2. Encoder加Cross-Attention中间层注入（Flamingo、Llama 3.2 Vision）；3. 无独立视觉编码器（Fuyu、NEO）；4. 理解与生成双路加扩散（以 BAGEL 为例）">
         <rect class="panel" x="8" y="8" width="226" height="334" rx="8"/>
         <rect class="panel" x="246" y="8" width="226" height="334" rx="8"/>
         <rect class="panel" x="484" y="8" width="226" height="334" rx="8"/>
         <rect class="panel" x="722" y="8" width="230" height="334" rx="8"/>
 
-        <foreignObject x="8" y="12" width="226" height="36"><div class="fo"><span><b>① Encoder + MLP 拼接</b></span><span class="fs">当前主流 · LLaVA / Qwen-VL</span></div></foreignObject>
+        <foreignObject x="8" y="12" width="226" height="36"><div class="fo"><span><b>① Encoder + MLP 拼接</b></span><span class="fs">LLaVA-1.5 / Qwen3.5</span></div></foreignObject>
         <foreignObject x="246" y="12" width="226" height="36"><div class="fo"><span><b>② Cross-Attention 注入</b></span><span class="fs">Flamingo / Llama 3.2 Vision</span></div></foreignObject>
-        <foreignObject x="484" y="12" width="226" height="36"><div class="fo"><span><b>③ Encoder-Free 早期融合</b></span><span class="fs">Fuyu / Chameleon / Emu3</span></div></foreignObject>
-        <foreignObject x="722" y="12" width="230" height="36"><div class="fo"><span><b>④ 理解+生成解耦 / 混合</b></span><span class="fs">Janus-Pro / Transfusion</span></div></foreignObject>
+        <foreignObject x="484" y="12" width="226" height="36"><div class="fo"><span><b>③ 无独立视觉编码器</b></span><span class="fs">Fuyu-8B / NEO</span></div></foreignObject>
+        <foreignObject x="722" y="12" width="230" height="36"><div class="fo"><span><b>④ 理解+生成解耦 / 混合</b></span><span class="fs">以 BAGEL 的双路架构为例</span></div></foreignObject>
 
         <!-- 1: Encoder + MLP -->
         <rect class="b-io" x="22" y="294" width="88" height="34" rx="5"/>
@@ -283,12 +283,12 @@ html{scroll-behavior:smooth}
 
         <!-- 3: Encoder-Free -->
         <rect class="b-io" x="498" y="294" width="92" height="34" rx="5"/>
-        <foreignObject x="498" y="294" width="92" height="34"><div class="fo"><span>图像</span><span class="fs">直接切块/VQ</span></div></foreignObject>
+        <foreignObject x="498" y="294" width="92" height="34"><div class="fo"><span>图像</span><span class="fs">直接切块</span></div></foreignObject>
         <rect class="b-io" x="606" y="294" width="90" height="34" rx="5"/>
         <foreignObject x="606" y="294" width="90" height="34"><div class="fo"><span>文本</span><span class="fs">BPE Token</span></div></foreignObject>
         <line class="ln arr" x1="544" y1="294" x2="544" y2="246"/>
         <rect class="b-tok" x="498" y="202" width="92" height="42" rx="5"/>
-        <foreignObject x="498" y="202" width="92" height="42"><div class="fo"><span>线性投影 /</span><span class="fs">VQ Codebook</span></div></foreignObject>
+        <foreignObject x="498" y="202" width="92" height="42"><div class="fo"><span>Patch 投影</span><span class="fs">像素 → embedding</span></div></foreignObject>
         <path class="ln arr" d="M544,202 V188 H570 V180"/>
         <path class="ln arr" d="M651,294 V188 H624 V180"/>
         <rect class="b-norm2" x="514" y="150" width="166" height="28" rx="5"/>
@@ -319,12 +319,12 @@ html{scroll-behavior:smooth}
 
   <div class="tbl">
     <table>
-      <thead><tr><th>架构范式</th><th>视觉接入点</th><th>纯文本能力保持</th><th>细粒度 / OCR</th><th>推理序列开销</th><th>代表模型</th></tr></thead>
+      <thead><tr><th>架构范式</th><th>视觉接入点</th><th>纯文本能力保持</th><th>细粒度 / OCR</th><th>推理序列开销</th><th>代表模型（首次公开年份）</th></tr></thead>
       <tbody>
-        <tr><th>Encoder + MLP 拼接</th><td>输入层拼接进 token 序列</td><td>需混纯文本防遗忘</td><td class="posv">强（无信息瓶颈）</td><td>视觉 token 占满 KV cache</td><td>LLaVA-1.5/NeXT、Qwen2/3-VL、InternVL 2.5</td></tr>
-        <tr><th>Cross-Attention 注入</th><td>LLM 中间若干层交叉注意力</td><td class="posv">冻结 LLM 时零损失</td><td>中等（深度交互层少）</td><td class="posv">不拉长主序列自注意力</td><td>Flamingo、Llama 3.2 Vision、NVLM-X</td></tr>
-        <tr><th>Encoder-Free / 原生早期融合</th><td>像素 patch 或 VQ token 直接进主干</td><td>从零混训可均衡</td><td>依赖大算力与高码率</td><td>视觉 token 往往较长</td><td>Fuyu-8B、Chameleon、Emu3、Solo</td></tr>
-        <tr><th>理解+生成解耦 / 混合</th><td>理解走语义 ViT，生成走 VAE+扩散</td><td>MoT 分参可大幅减少干扰</td><td class="posv">理解与生成兼得</td><td>生成需多步去噪</td><td>Transfusion、Janus-Pro、BAGEL、Qwen-Image</td></tr>
+        <tr><th>Encoder + MLP 拼接</th><td>视觉编码后投影到语言空间，作为输入序列的一部分</td><td>需混纯文本防遗忘</td><td class="posv">取决于输入分辨率和视觉 token 的压缩率</td><td>视觉 token 增加上下文开销</td><td><a href="https://arxiv.org/abs/2310.03744">LLaVA-1.5（2023）</a>、<a href="https://arxiv.org/abs/2511.21631">Qwen3-VL（2025）</a>、<a href="https://huggingface.co/Qwen/Qwen3.5-397B-A17B">Qwen3.5（2026）</a></td></tr>
+        <tr><th>Cross-Attention 注入</th><td>LLM 中间若干层交叉注意力</td><td class="posv">冻结基座且纯文本时旁路视觉模块，可保留原路径</td><td>取决于视觉特征与注入层数</td><td class="posv">仅交叉注入时不拉长文本序列</td><td><a href="https://arxiv.org/abs/2204.14198">Flamingo（2022）</a>、<a href="https://huggingface.co/meta-llama/Llama-3.2-11B-Vision-Instruct">Llama 3.2 Vision（2024）</a>、<a href="https://arxiv.org/abs/2512.19535">CASA（2025）</a></td></tr>
+        <tr><th>无独立视觉编码器（Encoder-Free）</th><td>像素 patch 经投影直接进主干，不经独立 ViT</td><td>从零混训可均衡</td><td>主干需从像素学习视觉特征</td><td>视觉 token 往往较长</td><td><a href="https://www.adept.ai/blog/fuyu-8b/">Fuyu-8B（2023）</a>、<a href="https://arxiv.org/abs/2510.14979">NEO（2025）</a></td></tr>
+        <tr><th>理解+生成解耦 / 混合</th><td>理解与生成使用不同视觉表示，或共享主干但使用不同预测目标</td><td>MoT 分参可大幅减少干扰</td><td class="posv">理解与生成兼得</td><td>离散生成逐 token 解码；流匹配生成通常需多步求解</td><td><a href="https://arxiv.org/abs/2501.17811">Janus-Pro（2025）</a>：离散自回归；<a href="https://arxiv.org/abs/2505.14683">BAGEL（2025）</a>：潜空间去噪；<a href="https://arxiv.org/abs/2609.11929">SenseNova-U1.5（2026）</a>：直接在像素空间生成</td></tr>
       </tbody>
     </table>
   </div>
